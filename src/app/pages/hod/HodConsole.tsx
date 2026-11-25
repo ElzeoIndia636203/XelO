@@ -5,6 +5,7 @@ import { errorMessage } from '../../../lib/errors';
 import { useSession } from '../../../lib/session';
 import { ConsoleShell, type NavItem } from '../../components/ConsoleShell';
 import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
+import { InteractiveAcademicCalendar } from '../../components/InteractiveAcademicCalendar';
 import { RolePortalToggle } from '../../components/RolePortalToggle';
 import { FeedbackLoopTab } from './FeedbackLoopTab';
 
@@ -2163,6 +2164,18 @@ export default function HodConsole() {
               </div>
             </section>
           )}
+
+          {/* Interactive Meetings & Clickable Events Calendar */}
+          <InteractiveAcademicCalendar
+            title="Meetings & clickable calendar"
+            events={calEvents}
+            onSelectDateForEvent={(iso) => {
+              setCalEvDay(iso);
+              setCalEvEndDay(iso);
+              setCalMonth(iso.slice(0, 7));
+              setNotice(`Selected ${iso} in the event form above. Choose category/event type and click Add event live.`);
+            }}
+          />
 
           <div
             style={{

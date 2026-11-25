@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import { errorMessage } from '../../../lib/errors';
 import { useSession } from '../../../lib/session';
 import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
+import { InteractiveAcademicCalendar } from '../../components/InteractiveAcademicCalendar';
 import { RolePortalToggle } from '../../components/RolePortalToggle';
 
 // ── types ──────────────────────────────────────────────────────────────────
@@ -648,7 +649,8 @@ export default function OversightConsole() {
           </div>
         )}
 
-        <div style={{ marginTop: 20 }}>
+        <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <InteractiveAcademicCalendar title="Calendar & approved meetings" />
           <HierarchyMeetingsCard
             title={
               role === 'vc'

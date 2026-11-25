@@ -20,6 +20,8 @@ interface MeetingRow {
   kind: 'notify' | 'meeting_request' | 'meeting_scheduled';
   title: string;
   scheduled_at: string | null;
+  duration_minutes?: number;
+  purpose?: string;
   note: string;
   status: 'pending' | 'accepted' | 'declined' | 'sent';
   created_at: string;
@@ -43,6 +45,8 @@ export function HierarchyMeetingsCard({
   );
   const [msgTitle, setMsgTitle] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
+  const [durationMinutes, setDurationMinutes] = useState(30);
+  const [purpose, setPurpose] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
@@ -93,9 +97,12 @@ export function HierarchyMeetingsCard({
         p_scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
         p_note: note.trim(),
         p_course_id: null,
+        p_duration_minutes: durationMinutes,
+        p_purpose: purpose.trim(),
       });
       setMsgTitle('');
       setScheduledAt('');
+      setPurpose('');
       setNote('');
       setFeedback({
         text:
@@ -194,6 +201,33 @@ export function HierarchyMeetingsCard({
               />
             </label>
           ) : null}
+          {mode !== 'notify' ? (
+            <>
+              <label className="field-label" style={{ flex: '1 1 180px' }}>
+                Purpose
+                <input
+                  className="field"
+                  value={purpose}
+                  onChange={(e) => setPurpose(e.target.value)}
+                  placeholder="Meeting purpose / agenda"
+                />
+              </label>
+              <label className="field-label">
+                Duration
+                <select
+                  className="field"
+                  value={durationMinutes}
+                  onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                >
+                  {[15, 30, 45, 60, 90].map((m) => (
+                    <option key={m} value={m}>
+                      {m} min
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ) : null}
           <label className="field-label" style={{ flex: '1 1 200px' }}>
             Note
             <input
@@ -233,6 +267,9 @@ export function HierarchyMeetingsCard({
                     <tr key={m.id}>
                       <td>
                         <div style={{ fontWeight: 500 }}>{m.title}</div>
+                        {m.purpose ? (
+                          <div style={{ fontSize: 12 }}>Purpose: {m.purpose} {m.duration_minutes ? `(${m.duration_minutes} min)` : ''}</div>
+                        ) : null}
                         {m.note ? (
                           <div style={{ fontSize: 12, color: 'var(--muted)' }}>{m.note}</div>
                         ) : null}

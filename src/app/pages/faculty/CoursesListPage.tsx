@@ -19,6 +19,7 @@ import { useSession } from '../../../lib/session';
 import { fetchAll, rpc, supabase } from '../../../lib/supabase';
 import { FeedbackInsightsCard } from '../../components/FeedbackInsightsCard';
 import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
+import { InteractiveAcademicCalendar } from '../../components/InteractiveAcademicCalendar';
 import { RolePortalToggle } from '../../components/RolePortalToggle';
 import type { Course, Department, School } from '../../../lib/types';
 
@@ -283,8 +284,9 @@ export function CoursesListPage() {
         ) : null}
 
         <FeedbackInsightsCard />
+        <InteractiveAcademicCalendar title="Calendar & approved meetings" />
         <HierarchyMeetingsCard
-          title="Notifications & meetings (Students / HOD / Dean)"
+          title="Notifications & meetings (Students / HOD / Dean / CoE / VC)"
           allowNotify
           allowRequest
         />
