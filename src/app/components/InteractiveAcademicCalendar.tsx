@@ -202,9 +202,39 @@ export function InteractiveAcademicCalendar({
         </div>
       }
     >
-      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
         Click any date to request or schedule a meeting (with purpose and duration), add an event, or view approved meetings.
       </p>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10, fontSize: 11 }}>
+        {[
+          { label: 'First/Last day', bg: '#ECFDF5', border: '#059669', color: '#047857' },
+          { label: 'End-sem', bg: '#F5F3FF', border: '#7C3AED', color: '#6D28D9' },
+          { label: 'Internal exam', bg: '#FEF3C7', border: '#D97706', color: '#B45309' },
+          { label: 'Holiday / Leave', bg: '#FFE4E6', border: '#E11D48', color: '#BE123C' },
+          { label: 'Academic event', bg: '#E0F2FE', border: '#0284C7', color: '#0369A1' },
+          { label: 'No-attendance', bg: '#FFEDD5', border: '#EA580C', color: '#C2410C' },
+          { label: 'Approved meeting', bg: '#CCFBF1', border: '#0D9488', color: '#0F766E' },
+          { label: 'Sat off / Sun', bg: '#EEF2FF', border: '#C7D2FE', color: '#4338CA' },
+        ].map((item) => (
+          <span
+            key={item.label}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '2px 8px',
+              borderRadius: 999,
+              background: item.bg,
+              border: `1px solid ${item.border}`,
+              color: item.color,
+              fontWeight: 600,
+            }}
+          >
+            {item.label}
+          </span>
+        ))}
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
         {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
@@ -226,18 +256,53 @@ export function InteractiveAcademicCalendar({
           const isFirst = firstWorkingDay === iso;
           const isLast = lastWorkingDay === iso;
           const isEndsem = expectedEndsemDate === iso;
+          const hasNoAtt = cellEvents.some((e) => e.no_attendance);
+          const hasExam = cellEvents.some((e) => e.kind === 'internal_exam');
+          const hasHoliday = cellEvents.some(
+            (e) => e.kind === 'regional_holiday' || e.kind === 'other_holiday' || e.kind === 'leave',
+          );
+          const hasAcademicEv = cellEvents.some((e) => e.kind === 'academic_event');
           const cellBg =
             cellMeetings.length > 0
-              ? '#E8F3F1'
-              : cellEvents.some((e) => e.no_attendance)
-                ? '#FFF2E6'
-                : cellEvents.length > 0
-                  ? '#E8F3F1'
-                  : isSunday || isSatHol
-                    ? '#F4F3EE'
-                    : inTerm
-                      ? '#FFFFFF'
-                      : '#FAFAF8';
+              ? '#CCFBF1'
+              : hasNoAtt
+                ? '#FFEDD5'
+                : hasExam
+                  ? '#FEF3C7'
+                  : hasHoliday
+                    ? '#FFE4E6'
+                    : hasAcademicEv
+                      ? '#E0F2FE'
+                      : isEndsem
+                        ? '#F5F3FF'
+                        : isFirst || isLast
+                          ? '#ECFDF5'
+                          : isSatHol
+                            ? '#EEF2FF'
+                            : isSunday
+                              ? '#F1F5F9'
+                              : inTerm
+                                ? '#FFFFFF'
+                                : '#FAFAF8';
+          const cellBorder = isSelected
+            ? '2px solid #0F766E'
+            : cellMeetings.length > 0
+              ? '1px solid #0D9488'
+              : hasNoAtt
+                ? '1px solid #EA580C'
+                : hasExam
+                  ? '1px solid #D97706'
+                  : hasHoliday
+                    ? '1px solid #E11D48'
+                    : hasAcademicEv
+                      ? '1px solid #0284C7'
+                      : isEndsem
+                        ? '1.5px solid #7C3AED'
+                        : isFirst || isLast
+                          ? '1.5px solid #059669'
+                          : isSatHol
+                            ? '1px solid #C7D2FE'
+                            : '1px solid var(--border)';
           return (
             <button
               key={iso}
@@ -247,16 +312,12 @@ export function InteractiveAcademicCalendar({
                 setMsg(null);
               }}
               style={{
-                minHeight: 74,
+                minHeight: 78,
                 padding: 6,
                 borderRadius: 6,
                 textAlign: 'left',
                 cursor: 'pointer',
-                border: isSelected
-                  ? '2px solid #0E5E52'
-                  : isFirst || isLast || isEndsem
-                    ? '1.5px solid #0E5E52'
-                    : '1px solid var(--border)',
+                border: cellBorder,
                 background: cellBg,
                 display: 'flex',
                 flexDirection: 'column',
@@ -264,27 +325,36 @@ export function InteractiveAcademicCalendar({
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>
+                <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: isSunday ? '#475569' : '#141413' }}>
                   {Number(iso.slice(8, 10))}
                 </span>
                 {(isSunday || isSatHol) && cellEvents.length === 0 && cellMeetings.length === 0 && (
-                  <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: isSatHol ? '#4338CA' : '#64748B' }}>
                     {isSunday ? 'Sun' : 'Sat off'}
                   </span>
                 )}
               </div>
-              {isFirst && <span style={{ fontSize: 10, color: '#0E5E52', fontWeight: 600 }}>First day</span>}
-              {isLast && <span style={{ fontSize: 10, color: '#0E5E52', fontWeight: 600 }}>Last day</span>}
-              {isEndsem && <span style={{ fontSize: 10, color: '#9A3412', fontWeight: 600 }}>End-sem</span>}
-              {cellEvents.map((ev, i) => (
-                <span key={i} style={{ fontSize: 10, color: ev.no_attendance ? '#9A3412' : '#0E5E52', fontWeight: 600, overflowWrap: 'anywhere' }}>
-                  {ev.event_type ? `${ev.event_type}: ` : ''}
-                  {ev.label}
-                  {ev.no_attendance ? ' (No-att.)' : ''}
-                </span>
-              ))}
+              {isFirst && <span style={{ fontSize: 10, color: '#047857', fontWeight: 700 }}>First day</span>}
+              {isLast && <span style={{ fontSize: 10, color: '#047857', fontWeight: 700 }}>Last day</span>}
+              {isEndsem && <span style={{ fontSize: 10, color: '#6D28D9', fontWeight: 700 }}>End-sem</span>}
+              {cellEvents.map((ev, i) => {
+                const evColor = ev.no_attendance
+                  ? '#C2410C'
+                  : ev.kind === 'internal_exam'
+                    ? '#B45309'
+                    : ev.kind === 'academic_event'
+                      ? '#0369A1'
+                      : '#BE123C';
+                return (
+                  <span key={i} style={{ fontSize: 10, color: evColor, fontWeight: 700, overflowWrap: 'anywhere' }}>
+                    {ev.event_type ? `${ev.event_type}: ` : ''}
+                    {ev.label}
+                    {ev.no_attendance ? ' (No-att.)' : ''}
+                  </span>
+                );
+              })}
               {cellMeetings.map((mt) => (
-                <span key={mt.id} style={{ fontSize: 10, color: '#0E5E52', fontWeight: 600, overflowWrap: 'anywhere' }}>
+                <span key={mt.id} style={{ fontSize: 10, color: '#0F766E', fontWeight: 700, overflowWrap: 'anywhere' }}>
                   {mt.title} ({mt.duration_minutes}m)
                 </span>
               ))}
