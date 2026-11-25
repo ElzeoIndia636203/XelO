@@ -1,0 +1,453 @@
+import { useState } from 'react';
+import { Banner, Card, Chip, Empty } from '../../../components/ui';
+import { errorMessage } from '../../../lib/errors';
+import {
+  parseRosterCsv,
+  parseRosterGrid,
+  splitRosterEvenly,
+  validateRoster,
+  type RosterRow,
+} from '../../../lib/logic/roster';
+import { fn, rpc, supabase } from '../../../lib/supabase';
+import type { Batch, Course, Enrollment, PendingEnrollment, Profile } from '../../../lib/types';
+
+export function BatchesStep({
+  course,
+  institutionDomain,
+  batches,
+  enrollments,
+  pendingEnrollments,
+  studentProfiles,
+  hasConductedSession,
+  onNotify,
+  onRefresh,
+}: {
+  course: Course;
+  institutionDomain: string;
+  batches: readonly Batch[];
+  enrollments: readonly Enrollment[];
+  pendingEnrollments: readonly PendingEnrollment[];
+  studentProfiles: readonly Profile[];
+  hasConductedSession: boolean;
+  onNotify: (msg: string, ok: boolean) => void;
+  onRefresh: () => void;
+}) {
+  const [csvText, setCsvText] = useState('');
+  const [parsedRows, setParsedRows] = useState<RosterRow[]>([]);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [batchEdits, setBatchEdits] = useState<
+    Record<string, { slot: string; room: string; staff: string }>
+  >({});
+  const [busy, setBusy] = useState(false);
+
+  const profileMap = new Map(studentProfiles.map((p) => [p.id, p]));
+  const totalStudents = enrollments.length + pendingEnrollments.length;
+  const joinedCount = enrollments.length;
+  const pendingCount = pendingEnrollments.length;
+
+  function processRows(raw: RosterRow[]) {
+    const { valid, errors } = validateRoster(raw, institutionDomain);
+    setParsedRows(valid);
+    setParseErrors(errors);
+  }
+
+  async function handleFile(file: File | null) {
+    if (!file) return;
+    setParseErrors([]);
+    try {
+      if (file.name.toLowerCase().endsWith('.xlsx')) {
+        const { readSheet } = await import('read-excel-file/browser');
+        const rows = await readSheet(file);
+        processRows(parseRosterGrid(rows));
+      } else {
+        const text = await file.text();
+        setCsvText(text);
+        processRows(parseRosterCsv(text));
+      }
+    } catch (err) {
+      setParseErrors([errorMessage(err)]);
+    }
+  }
+
+  function handlePastePreview() {
+    processRows(parseRosterCsv(csvText));
+  }
+
+  async function confirmImport() {
+    if (parsedRows.length === 0 || parseErrors.length > 0) return;
+    setBusy(true);
+    try {
+      const created = await rpc<
+        Array<{ batch_id: string; batch_name: string; class_code: string; student_count: number }>
+      >('import_roster', {
+        p_course_id: course.id,
+        p_rows: parsedRows,
+      });
+
+      const batchCodeMap = new Map(created.map((b) => [b.batch_name, b.class_code]));
+      const split = splitRosterEvenly(parsedRows, 65);
+      const invitesPayload = split.flatMap((chunk, idx) => {
+        const code = batchCodeMap.get(`Batch ${String.fromCharCode(65 + idx)}`) ?? created[0]?.class_code;
+        return chunk.map((s) => ({
+          email: s.email,
+          fullName: s.full_name,
+          role: 'student' as const,
+          classCode: code,
+        }));
+      });
+
+      let mailNote = '';
+      if (invitesPayload.length > 0) {
+        try {
+          await fn('send-invites', {
+            institutionId: course.institution_id,
+            invites: invitesPayload.slice(0, 100),
+          });
+          mailNote = ' Invite emails queued.';
+        } catch {
+          mailNote = ' Roster and invites saved.';
+        }
+      }
+
+      setParsedRows([]);
+      setCsvText('');
+      onNotify(`Imported ${parsedRows.length} students into ${created.length} batches.${mailNote}`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendPendingInvites() {
+    if (pendingEnrollments.length === 0) return;
+    setBusy(true);
+    try {
+      const batchCodeById = new Map(batches.map((b) => [b.id, b.class_code]));
+      await fn('send-invites', {
+        institutionId: course.institution_id,
+        invites: pendingEnrollments.slice(0, 100).map((pe) => ({
+          email: pe.email,
+          fullName: pe.full_name,
+          role: 'student',
+          classCode: batchCodeById.get(pe.batch_id),
+        })),
+      });
+      onNotify(`Resent ${pendingEnrollments.length} pending invites with class codes.`, true);
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveBatchMeta(b: Batch) {
+    const patch = batchEdits[b.id];
+    if (!patch) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from('batches')
+        .update({ slot: patch.slot, room: patch.room, staff: patch.staff })
+        .eq('id', b.id);
+      if (error) throw new Error(error.message);
+      onNotify(`Saved details for ${b.name}.`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveStudent(email: string, toBatchId: string) {
+    setBusy(true);
+    try {
+      await rpc('move_student', {
+        p_course_id: course.id,
+        p_student_email: email,
+        p_to_batch_id: toBatchId,
+      });
+      onNotify(`Moved ${email}.`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const previewSplit = splitRosterEvenly(parsedRows, 65);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card
+        title="Roster summary"
+        actions={
+          pendingCount > 0 ? (
+            <button
+              type="button"
+              className="btn field-sm"
+              disabled={busy}
+              onClick={() => void resendPendingInvites()}
+            >
+              Resend {pendingCount} invites
+            </button>
+          ) : null
+        }
+      >
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, alignItems: 'center', fontSize: 13 }}>
+          <div>
+            <strong>{totalStudents}</strong> students
+          </div>
+          <div>
+            <Chip tone="good">{joinedCount} joined</Chip>
+          </div>
+          <div>
+            <Chip tone={pendingCount > 0 ? 'warn' : 'neutral'}>{pendingCount} invites pending</Chip>
+          </div>
+          {batches.length > 0 ? (
+            <div className="mono" style={{ fontSize: 12, color: 'var(--muted)' }}>
+              Class codes: {batches.map((b) => `${b.name} ${b.class_code}`).join(' · ')}
+            </div>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card title="Import roster (CSV or Excel)">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            Columns: <span className="mono">roll_no, full_name, email</span> (@{institutionDomain}). Batches split
+            evenly at most 65 students per batch.
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <input
+              type="file"
+              aria-label="Upload roster file"
+              accept=".csv,.tsv,.xlsx"
+              disabled={hasConductedSession}
+              onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
+
+          <label className="field-label">
+            Or paste CSV / TSV rows
+            <textarea
+              className="field mono"
+              rows={4}
+              disabled={hasConductedSession}
+              value={csvText}
+              onChange={(e) => setCsvText(e.target.value)}
+              placeholder={'roll_no,full_name,email\n2301001,Aarav Patil,aarav@sanjivani.edu.in'}
+              style={{ height: 'auto', padding: 8 }}
+            />
+          </label>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={!csvText.trim() || hasConductedSession}
+              onClick={handlePastePreview}
+            >
+              Preview split
+            </button>
+          </div>
+
+          {parseErrors.length > 0 ? (
+            <Banner tone="err">
+              {parseErrors.slice(0, 5).join(' ')}
+              {parseErrors.length > 5 ? ` (+${parseErrors.length - 5} more)` : ''}
+            </Banner>
+          ) : null}
+
+          {parsedRows.length > 0 && parseErrors.length === 0 ? (
+            <div
+              style={{
+                padding: 12,
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                background: 'var(--surface-alt)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                Ready to import {parsedRows.length} students into {previewSplit.length} batch(es):{' '}
+                <span className="mono">
+                  {previewSplit
+                    .map((chunk, i) => `Batch ${String.fromCharCode(65 + i)} (${chunk.length})`)
+                    .join(' · ')}
+                </span>
+              </div>
+              <div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => void confirmImport()}
+                >
+                  Confirm import and create batches
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </Card>
+
+      {batches.length === 0 ? (
+        <Empty
+          title="No batches yet"
+          body="Import a section roster above to split into batches of ≤ 65 and generate class codes."
+        />
+      ) : (
+        batches.map((b) => {
+          const curEdit = batchEdits[b.id] ?? { slot: b.slot, room: b.room, staff: b.staff };
+          const batchEnrolled = enrollments
+            .filter((e) => e.batch_id === b.id)
+            .map((e) => {
+              const p = profileMap.get(e.student_id);
+              return {
+                key: e.id,
+                roll: p?.roll_no ?? '—',
+                name: p?.full_name ?? 'Student',
+                email: p?.email ?? '',
+                joined: true,
+              };
+            });
+          const batchPending = pendingEnrollments
+            .filter((pe) => pe.batch_id === b.id)
+            .map((pe) => ({
+              key: pe.id,
+              roll: pe.roll_no,
+              name: pe.full_name,
+              email: pe.email,
+              joined: false,
+            }));
+          const members = [...batchEnrolled, ...batchPending].sort((a, x) =>
+            a.roll.localeCompare(x.roll),
+          );
+
+          return (
+            <Card
+              key={b.id}
+              title={`${b.name} · ${members.length} students`}
+              actions={<Chip tone="neutral">Code: {b.class_code}</Chip>}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+                  <label className="field-label">
+                    Slot
+                    <input
+                      className="field field-sm"
+                      value={curEdit.slot}
+                      onChange={(e) =>
+                        setBatchEdits((prev) => ({
+                          ...prev,
+                          [b.id]: { ...curEdit, slot: e.target.value },
+                        }))
+                      }
+                      style={{ width: 170 }}
+                    />
+                  </label>
+                  <label className="field-label">
+                    Room
+                    <input
+                      className="field field-sm"
+                      value={curEdit.room}
+                      onChange={(e) =>
+                        setBatchEdits((prev) => ({
+                          ...prev,
+                          [b.id]: { ...curEdit, room: e.target.value },
+                        }))
+                      }
+                      style={{ width: 110 }}
+                    />
+                  </label>
+                  <label className="field-label">
+                    Lab staff
+                    <input
+                      className="field field-sm"
+                      value={curEdit.staff}
+                      onChange={(e) =>
+                        setBatchEdits((prev) => ({
+                          ...prev,
+                          [b.id]: { ...curEdit, staff: e.target.value },
+                        }))
+                      }
+                      style={{ width: 170 }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn field-sm"
+                    disabled={busy}
+                    onClick={() => void saveBatchMeta(b)}
+                  >
+                    Save batch
+                  </button>
+                </div>
+
+                {members.length > 0 ? (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Roll</th>
+                          <th>Name</th>
+                          <th>Email</th>
+                          <th>Status</th>
+                          {batches.length > 1 ? <th style={{ textAlign: 'right' }}>Batch</th> : null}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {members.map((m) => (
+                          <tr key={m.key}>
+                            <td className="mono">{m.roll}</td>
+                            <td>{m.name}</td>
+                            <td className="mono" style={{ fontSize: 12 }}>
+                              {m.email}
+                            </td>
+                            <td>
+                              <Chip tone={m.joined ? 'good' : 'warn'}>
+                                {m.joined ? 'Joined' : 'Invited'}
+                              </Chip>
+                            </td>
+                            {batches.length > 1 ? (
+                              <td style={{ textAlign: 'right' }}>
+                                <select
+                                  aria-label={`Move ${m.email} to batch`}
+                                  className="field field-sm"
+                                  disabled={hasConductedSession || busy || !m.email}
+                                  value={b.id}
+                                  onChange={(e) => {
+                                    if (e.target.value !== b.id) {
+                                      void moveStudent(m.email, e.target.value);
+                                    }
+                                  }}
+                                >
+                                  {batches.map((target) => (
+                                    <option key={target.id} value={target.id}>
+                                      {target.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                            ) : null}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
+            </Card>
+          );
+        })
+      )}
+    </div>
+  );
+}
