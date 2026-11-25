@@ -101,3 +101,7 @@ The PRD's API groups map to database functions (`rpc`) and edge functions. The c
 - **`authorize_run` signature (`0020_endsem_workflows.sql`):** Replaced the 5-argument `authorize_run(uuid, uuid, run_context, run_mode, uuid)` in-place (preserving `0009_lab_prep_workflows.sql` signature) to extend `p_context = 'exam'` cleanly without creating an overloaded function.
 - **Browser proctoring (`src/lib/proctor-runtime.ts`):** Camera and entire-screen `MediaStream` objects are held at module level so they survive navigation from the waiting room (`S8`) to the proctored IDE (`S9`) without re-prompting.
 - **Workbench exam support (`src/components/Workbench.tsx`):** Added optional `runContext` (`'lab' | 'exam'`) and `paperId` props so the proctored IDE reuses the shared CodeMirror 6 workbench.
+
+## Deployment & Auth decisions — 2026-11-25
+
+- **OTP sign-in for first-time invited users (`src/app/pages/LoginPage.tsx`):** Switched `signInWithOtp` from `shouldCreateUser: false` to `shouldCreateUser: true`. With `shouldCreateUser: false`, GoTrue rejects invited users who have a `public.invites` row but no `auth.users` row yet (`422 otp_disabled`) before the database sign-up gate runs. Invites and email domains remain strictly enforced server-side by `preflight_sign_in` and the `auth.users` `BEFORE INSERT` trigger (`0003_workflows.sql`).

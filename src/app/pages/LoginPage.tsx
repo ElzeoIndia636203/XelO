@@ -107,7 +107,10 @@ export function LoginPage() {
       const { error } = await supabase.auth.signInWithOtp({
         email: validEmail,
         options: {
-          shouldCreateUser: false,
+          // Server-side signup is gated by preflight_sign_in + the auth.users BEFORE INSERT trigger
+          // against public.invites; first-time invited users need shouldCreateUser: true so GoTrue
+          // can issue the OTP link before their auth.users row exists.
+          shouldCreateUser: true,
           emailRedirectTo: `${window.location.origin}/app/login`,
         },
       });

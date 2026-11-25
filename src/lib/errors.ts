@@ -48,6 +48,9 @@ const MESSAGES: Record<string, string> = {
   student_absent: 'Viva marks cannot be entered for an absent student.',
   plan_not_approved: 'Course plan must be HOD-approved before submitting final marks.',
   invalid_token: 'Calendar link is invalid or revoked. Generate a fresh link.',
+  'Signups not allowed for otp':
+    "This email isn't onboarded yet. Ask your faculty for an invite or your admin for an account.",
+  'Email rate limit exceeded': 'Too many sign-in emails sent. Please wait a few minutes and try again.',
 };
 
 export function errorMessage(err: unknown): string {
