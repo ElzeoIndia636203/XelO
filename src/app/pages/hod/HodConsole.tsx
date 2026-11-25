@@ -243,37 +243,6 @@ const ACADEMIC_EVENT_PRESETS = [
   'Other',
 ] as const;
 
-function isSaturdayHolidayForRule(isoDate: string, rule: SaturdayRule): boolean {
-  const dt = new Date(`${isoDate}T00:00:00Z`);
-  if (dt.getUTCDay() !== 6) return false;
-  if (rule === 'all') return true;
-  if (rule === 'none') return false;
-  const nth = Math.ceil(dt.getUTCDate() / 7);
-  return rule === 'odd' ? nth % 2 === 1 : nth % 2 === 0;
-}
-
-function buildMonthGrid(ym: string): Array<string | null> {
-  const [yStr, mStr] = ym.split('-');
-  const y = Number(yStr);
-  const m = Number(mStr);
-  if (!y || !m) return [];
-  const firstDow = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(); // 0=Sun..6=Sat
-  const offset = (firstDow + 6) % 7; // Mon=0..Sun=6
-  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const cells: Array<string | null> = Array.from({ length: offset }, () => null);
-  for (let d = 1; d <= daysInMonth; d++) {
-    cells.push(`${yStr}-${mStr}-${String(d).padStart(2, '0')}`);
-  }
-  while (cells.length % 7 !== 0) cells.push(null);
-  return cells;
-}
-
-function shiftMonth(ym: string, delta: number): string {
-  const [yStr, mStr] = ym.split('-');
-  const dt = new Date(Date.UTC(Number(yStr), Number(mStr) - 1 + delta, 1));
-  return dt.toISOString().slice(0, 7);
-}
-
 const STANDARD_NBA_POS: ReadonlyArray<{ code: string; statement: string }> = [
   {
     code: 'PO1',
@@ -374,7 +343,6 @@ export default function HodConsole() {
   const [calEvCustomType, setCalEvCustomType] = useState('');
   const [calEvNoAttendance, setCalEvNoAttendance] = useState(false);
   const [calEvLabel, setCalEvLabel] = useState('');
-  const [calMonth, setCalMonth] = useState('2027-01');
   const [editingEvId, setEditingEvId] = useState<string | null>(null);
   const [editEvDay, setEditEvDay] = useState('');
   const [editEvKind, setEditEvKind] = useState<CalendarEventKind>('internal_exam');
@@ -442,7 +410,6 @@ export default function HodConsole() {
       setCalEndsemDate(typedCal.expected_endsem_date ?? '');
       setCalSatRule(typedCal.saturday_rule);
       setCalApproved(typedCal.approved);
-      setCalMonth(typedCal.first_working_day.slice(0, 7));
       const { data: evRows } = await supabase
         .from('academic_calendar_events')
         .select('id, day, kind, event_type, label, no_attendance')
@@ -878,7 +845,6 @@ export default function HodConsole() {
       notified_users?: number;
       override_text?: string | null;
     };
-    setCalMonth(calEvDay.slice(0, 7));
     setCalEvDay('');
     setCalEvEndDay('');
     setCalEvLabel('');
@@ -2059,120 +2025,18 @@ export default function HodConsole() {
             </form>
           </section>
 
-          {/* Visual Monthly Academic Calendar */}
-          {calFirstDay && calLastDay && (
-            <section
-              style={{
-                padding: 16,
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                background: 'var(--surface)',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-                <div>
-                  <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>
-                    Academic calendar view {calApproved ? '· Approved' : '· Preview'}
-                  </h2>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: 2 }}>
-                    Shows working days, Saturday holidays, exams, and HoD-declared academic/no-attendance events.
-                  </p>
-                </div>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  <button type="button" className="btn field-sm" onClick={() => setCalMonth((m) => shiftMonth(m, -1))}>
-                    Prev
-                  </button>
-                  <span className="mono" style={{ fontSize: '0.88rem', minWidth: 90, textAlign: 'center' }}>
-                    {calMonth}
-                  </span>
-                  <button type="button" className="btn field-sm" onClick={() => setCalMonth((m) => shiftMonth(m, 1))}>
-                    Next
-                  </button>
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-                  <div key={d} className="mono" style={{ fontSize: '0.75rem', color: 'var(--muted)', padding: '4px 6px', textAlign: 'center' }}>
-                    {d}
-                  </div>
-                ))}
-                {buildMonthGrid(calMonth).map((iso, idx) => {
-                  if (!iso) {
-                    return <div key={`empty-${idx}`} style={{ minHeight: 72, borderRadius: 6, background: 'rgba(0,0,0,0.02)' }} />;
-                  }
-                  const ev = calEvents.find((e) => e.day === iso);
-                  const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
-                  const isSunday = dow === 0;
-                  const isSatHol = isSaturdayHolidayForRule(iso, calSatRule);
-                  const inTerm = iso >= calFirstDay && iso <= calLastDay;
-                  const isEndsem = calEndsemDate === iso;
-                  const isFirst = calFirstDay === iso;
-                  const isLast = calLastDay === iso;
-                  const bg = ev?.no_attendance
-                    ? '#FFF2E6'
-                    : ev
-                      ? '#E8F3F1'
-                      : isSunday || isSatHol
-                        ? '#F4F3EE'
-                        : inTerm
-                          ? '#FFFFFF'
-                          : '#FAFAF8';
-                  return (
-                    <div
-                      key={iso}
-                      style={{
-                        minHeight: 72,
-                        padding: 6,
-                        borderRadius: 6,
-                        border: isFirst || isLast || isEndsem ? '1.5px solid #0E5E52' : '1px solid var(--border)',
-                        background: bg,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 3,
-                        fontSize: '0.75rem',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span className="mono" style={{ fontWeight: 600 }}>{Number(iso.slice(8, 10))}</span>
-                        {(isSunday || isSatHol) && !ev && (
-                          <span style={{ fontSize: '0.66rem', color: 'var(--muted)' }}>
-                            {isSunday ? 'Sun' : 'Sat off'}
-                          </span>
-                        )}
-                      </div>
-                      {isFirst && <span style={{ fontSize: '0.68rem', color: '#0E5E52', fontWeight: 600 }}>First day</span>}
-                      {isLast && <span style={{ fontSize: '0.68rem', color: '#0E5E52', fontWeight: 600 }}>Last day</span>}
-                      {isEndsem && <span style={{ fontSize: '0.68rem', color: '#9A3412', fontWeight: 600 }}>End-sem</span>}
-                      {ev && (
-                        <div
-                          style={{
-                            fontSize: '0.68rem',
-                            lineHeight: 1.25,
-                            color: ev.no_attendance ? '#9A3412' : '#0E5E52',
-                            fontWeight: 600,
-                            overflowWrap: 'anywhere',
-                          }}
-                        >
-                          {ev.event_type ? `${ev.event_type}: ` : ''}
-                          {ev.label}
-                          {ev.no_attendance ? ' (No-att.)' : ''}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
-          {/* Interactive Meetings & Clickable Events Calendar */}
+          {/* Unified Academic & Meetings Calendar */}
           <InteractiveAcademicCalendar
-            title="Meetings & clickable calendar"
+            title={`Academic calendar & meetings ${calApproved ? '· Approved' : '· Preview'}`}
             events={calEvents}
+            firstWorkingDay={calFirstDay}
+            lastWorkingDay={calLastDay}
+            expectedEndsemDate={calEndsemDate}
+            saturdayRule={calSatRule}
+            initialMonth={calFirstDay ? calFirstDay.slice(0, 7) : undefined}
             onSelectDateForEvent={(iso) => {
               setCalEvDay(iso);
               setCalEvEndDay(iso);
-              setCalMonth(iso.slice(0, 7));
               setNotice(`Selected ${iso} in the event form above. Choose category/event type and click Add event live.`);
             }}
           />

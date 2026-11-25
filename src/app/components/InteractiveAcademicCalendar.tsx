@@ -33,6 +33,17 @@ export interface CalendarOverlayEvent {
   no_attendance?: boolean;
 }
 
+export type CalendarSaturdayRule = 'all' | 'odd' | 'even' | 'none';
+
+function isSaturdayHolidayForRule(isoDate: string, rule: CalendarSaturdayRule): boolean {
+  const dt = new Date(`${isoDate}T00:00:00Z`);
+  if (dt.getUTCDay() !== 6) return false;
+  if (rule === 'all') return true;
+  if (rule === 'none') return false;
+  const nth = Math.ceil(dt.getUTCDate() / 7);
+  return rule === 'odd' ? nth % 2 === 1 : nth % 2 === 0;
+}
+
 function buildMonthGrid(ym: string): Array<string | null> {
   const [yStr, mStr] = ym.split('-');
   const y = Number(yStr);
@@ -58,15 +69,25 @@ function shiftMonth(ym: string, delta: number): string {
 export function InteractiveAcademicCalendar({
   title = 'Calendar & approved meetings',
   events = [],
+  firstWorkingDay,
+  lastWorkingDay,
+  expectedEndsemDate,
+  saturdayRule = 'none',
+  initialMonth,
   onSelectDateForEvent,
   onJumpToNotifications,
 }: {
   title?: string;
   events?: readonly CalendarOverlayEvent[];
+  firstWorkingDay?: string;
+  lastWorkingDay?: string;
+  expectedEndsemDate?: string;
+  saturdayRule?: CalendarSaturdayRule;
+  initialMonth?: string;
   onSelectDateForEvent?: (isoDate: string) => void;
   onJumpToNotifications?: () => void;
 }) {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(() => initialMonth || new Date().toISOString().slice(0, 7));
   const [meetings, setMeetings] = useState<CalendarMeetingItem[]>([]);
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -198,6 +219,25 @@ export function InteractiveAcademicCalendar({
           const cellMeetings = meetings.filter((m) => m.scheduled_at.slice(0, 10) === iso);
           const cellEvents = events.filter((ev) => ev.day === iso);
           const isSelected = selectedDay === iso;
+          const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+          const isSunday = dow === 0;
+          const isSatHol = isSaturdayHolidayForRule(iso, saturdayRule);
+          const inTerm = Boolean(firstWorkingDay && lastWorkingDay && iso >= firstWorkingDay && iso <= lastWorkingDay);
+          const isFirst = firstWorkingDay === iso;
+          const isLast = lastWorkingDay === iso;
+          const isEndsem = expectedEndsemDate === iso;
+          const cellBg =
+            cellMeetings.length > 0
+              ? '#E8F3F1'
+              : cellEvents.some((e) => e.no_attendance)
+                ? '#FFF2E6'
+                : cellEvents.length > 0
+                  ? '#E8F3F1'
+                  : isSunday || isSatHol
+                    ? '#F4F3EE'
+                    : inTerm
+                      ? '#FFFFFF'
+                      : '#FAFAF8';
           return (
             <button
               key={iso}
@@ -207,30 +247,40 @@ export function InteractiveAcademicCalendar({
                 setMsg(null);
               }}
               style={{
-                minHeight: 68,
+                minHeight: 74,
                 padding: 6,
                 borderRadius: 6,
                 textAlign: 'left',
                 cursor: 'pointer',
-                border: isSelected ? '2px solid #0E5E52' : '1px solid var(--border)',
-                background:
-                  cellMeetings.length > 0
-                    ? '#E8F3F1'
-                    : cellEvents.some((e) => e.no_attendance)
-                      ? '#FFF2E6'
-                      : '#FFFFFF',
+                border: isSelected
+                  ? '2px solid #0E5E52'
+                  : isFirst || isLast || isEndsem
+                    ? '1.5px solid #0E5E52'
+                    : '1px solid var(--border)',
+                background: cellBg,
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 3,
               }}
             >
-              <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>
-                {Number(iso.slice(8, 10))}
-              </span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>
+                  {Number(iso.slice(8, 10))}
+                </span>
+                {(isSunday || isSatHol) && cellEvents.length === 0 && cellMeetings.length === 0 && (
+                  <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+                    {isSunday ? 'Sun' : 'Sat off'}
+                  </span>
+                )}
+              </div>
+              {isFirst && <span style={{ fontSize: 10, color: '#0E5E52', fontWeight: 600 }}>First day</span>}
+              {isLast && <span style={{ fontSize: 10, color: '#0E5E52', fontWeight: 600 }}>Last day</span>}
+              {isEndsem && <span style={{ fontSize: 10, color: '#9A3412', fontWeight: 600 }}>End-sem</span>}
               {cellEvents.map((ev, i) => (
-                <span key={i} style={{ fontSize: 10, color: '#9A3412', fontWeight: 600, overflowWrap: 'anywhere' }}>
+                <span key={i} style={{ fontSize: 10, color: ev.no_attendance ? '#9A3412' : '#0E5E52', fontWeight: 600, overflowWrap: 'anywhere' }}>
                   {ev.event_type ? `${ev.event_type}: ` : ''}
                   {ev.label}
+                  {ev.no_attendance ? ' (No-att.)' : ''}
                 </span>
               ))}
               {cellMeetings.map((mt) => (
