@@ -51,6 +51,7 @@ const MESSAGES: Record<string, string> = {
   'Signups not allowed for otp':
     "This email isn't onboarded yet. Ask your faculty for an invite or your admin for an account.",
   'Email rate limit exceeded': 'Too many sign-in emails sent. Please wait a few minutes and try again.',
+  'email rate limit exceeded': 'Too many sign-in emails sent. Please wait a few minutes and try again.',
 };
 
 export function errorMessage(err: unknown): string {
