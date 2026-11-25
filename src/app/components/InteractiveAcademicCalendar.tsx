@@ -76,11 +76,11 @@ function shiftMonth(ym: string, delta: number): string {
 
 export function InteractiveAcademicCalendar({
   title = 'Calendar & approved meetings',
-  events = [],
-  firstWorkingDay,
-  lastWorkingDay,
-  expectedEndsemDate,
-  saturdayRule = 'none',
+  events: eventsProp,
+  firstWorkingDay: firstWorkingDayProp,
+  lastWorkingDay: lastWorkingDayProp,
+  expectedEndsemDate: expectedEndsemDateProp,
+  saturdayRule: saturdayRuleProp,
   initialMonth,
   onSelectDateForEvent,
   onJumpToNotifications,
@@ -101,6 +101,13 @@ export function InteractiveAcademicCalendar({
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [myBusyDays, setMyBusyDays] = useState<BusyDayItem[]>([]);
   const [recipientBusyDays, setRecipientBusyDays] = useState<BusyDayItem[]>([]);
+  const [loadedCal, setLoadedCal] = useState<{
+    first_working_day?: string;
+    last_working_day?: string;
+    expected_endsem_date?: string | null;
+    saturday_rule?: CalendarSaturdayRule;
+    events: CalendarOverlayEvent[];
+  } | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [actionMode, setActionMode] = useState<'meeting_request' | 'meeting_scheduled' | 'notify'>('meeting_request');
   const [recipientId, setRecipientId] = useState('');
@@ -111,6 +118,12 @@ export function InteractiveAcademicCalendar({
   const [duration, setDuration] = useState(30);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const events = eventsProp ?? loadedCal?.events ?? [];
+  const firstWorkingDay = firstWorkingDayProp ?? loadedCal?.first_working_day;
+  const lastWorkingDay = lastWorkingDayProp ?? loadedCal?.last_working_day;
+  const expectedEndsemDate = expectedEndsemDateProp ?? loadedCal?.expected_endsem_date ?? undefined;
+  const saturdayRule = saturdayRuleProp ?? loadedCal?.saturday_rule ?? 'none';
 
   const rolesList = profile?.roles?.length ? profile.roles : profile?.role ? [profile.role] : [];
   const canBlockBusy = rolesList.some((r) => ['faculty', 'hod', 'dean', 'coe', 'vc', 'super_admin'].includes(r));
@@ -134,12 +147,52 @@ export function InteractiveAcademicCalendar({
       supabase.rpc('list_hierarchy_contacts'),
       supabase.rpc('list_busy_days'),
     ]);
+    let calPayload: {
+      first_working_day?: string;
+      last_working_day?: string;
+      expected_endsem_date?: string | null;
+      saturday_rule?: CalendarSaturdayRule;
+      events: CalendarOverlayEvent[];
+    } | null = null;
+    if (eventsProp === undefined && profile?.institution_id) {
+      let calQuery = supabase
+        .from('academic_calendars')
+        .select('id, first_working_day, last_working_day, expected_endsem_date, saturday_rule')
+        .eq('approved', true)
+        .eq('institution_id', profile.institution_id);
+      if (profile.department_id) {
+        calQuery = calQuery.eq('department_id', profile.department_id);
+      }
+      const { data: calRows } = await calQuery.limit(1);
+      const calRow = (calRows?.[0] ?? null) as {
+        id: string;
+        first_working_day: string;
+        last_working_day: string;
+        expected_endsem_date: string | null;
+        saturday_rule: CalendarSaturdayRule;
+      } | null;
+      if (calRow) {
+        const { data: evRows } = await supabase
+          .from('academic_calendar_events')
+          .select('day, kind, event_type, label, no_attendance')
+          .eq('calendar_id', calRow.id)
+          .order('day');
+        calPayload = {
+          first_working_day: calRow.first_working_day,
+          last_working_day: calRow.last_working_day,
+          expected_endsem_date: calRow.expected_endsem_date,
+          saturday_rule: calRow.saturday_rule,
+          events: (evRows ?? []) as CalendarOverlayEvent[],
+        };
+      }
+    }
     return {
       meetings: (mData ?? []) as CalendarMeetingItem[],
       contacts: (cData ?? []) as ContactOption[],
       busyDays: (bData ?? []) as BusyDayItem[],
+      calPayload,
     };
-  }, []);
+  }, [eventsProp, profile]);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,6 +201,9 @@ export function InteractiveAcademicCalendar({
       setMeetings(res.meetings);
       setContacts(res.contacts);
       setMyBusyDays(res.busyDays);
+      if (res.calPayload) {
+        setLoadedCal(res.calPayload);
+      }
     });
     return () => {
       cancelled = true;

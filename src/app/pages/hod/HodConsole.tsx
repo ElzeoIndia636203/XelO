@@ -1458,6 +1458,7 @@ export default function HodConsole() {
             </div>
           )}
 
+          <InteractiveAcademicCalendar title="Calendar & approved meetings" />
           <HierarchyMeetingsCard
             title="Meetings & notifications (Faculty / Dean / CoE / VC)"
             allowNotify
