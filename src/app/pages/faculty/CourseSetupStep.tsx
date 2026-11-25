@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Banner, Card, Chip, Modal, statusTone } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { useLoad } from '../../../lib/hooks';
+import { inferBloomLevel } from '../../../lib/logic/bloom';
 import { planChecks, rubricSum } from '../../../lib/logic/checks';
 import { pdfToText } from '../../../lib/pdf';
 import { fn, rpc, supabase } from '../../../lib/supabase';
@@ -76,8 +77,9 @@ export function CourseSetupStep({
   const [newCoCode, setNewCoCode] = useState(`CO${outcomes.length + 1}`);
   const [newCoStmt, setNewCoStmt] = useState('');
   const [newCoUnit, setNewCoUnit] = useState(1);
-  const [newCoBtl, setNewCoBtl] = useState(3);
   const [busy, setBusy] = useState(false);
+
+  const inferredBloom = inferBloomLevel(newCoStmt);
 
   // F1a Syllabus Assist modal state
   const [assistOpen, setAssistOpen] = useState(false);
@@ -157,18 +159,49 @@ export function CourseSetupStep({
     if (locked || !newCoStmt.trim()) return;
     setBusy(true);
     try {
+      let assignedBtl: number = inferredBloom.btl;
+      // Try Assist AI classification when available; fall back seamlessly to local Bloom analyzer.
+      try {
+        const res = await fn<{ outcomes?: Array<{ btl?: number }> }>('ai-generate', {
+          kind: 'outcomes',
+          courseId: course.id,
+          syllabusText: newCoStmt.trim(),
+        });
+        const aiBtl = res?.outcomes?.[0]?.btl;
+        if (typeof aiBtl === 'number' && aiBtl >= 1 && aiBtl <= 6) {
+          assignedBtl = aiBtl;
+        }
+      } catch {
+        // Local Bloom analyzer already inferred assignedBtl.
+      }
+
       const { error } = await supabase.from('course_outcomes').insert({
         course_id: course.id,
         institution_id: course.institution_id,
         code: newCoCode.trim().toUpperCase(),
         statement: newCoStmt.trim(),
-        btl: newCoBtl,
+        btl: assignedBtl,
         unit: newCoUnit,
       });
       if (error) throw new Error(error.message);
       setNewCoStmt('');
       setNewCoCode(`CO${outcomes.length + 2}`);
-      onNotify('Outcome added.', true);
+      onNotify(`Outcome added (Assist assigned L${assignedBtl}).`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function overrideOutcomeBtl(id: string, btl: number) {
+    if (locked) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase.from('course_outcomes').update({ btl }).eq('id', id);
+      if (error) throw new Error(error.message);
+      onNotify(`BTL updated to L${btl}.`, true);
       onRefresh();
     } catch (err) {
       onNotify(errorMessage(err), false);
@@ -499,7 +532,25 @@ export function CourseSetupStep({
                         </td>
                         <td>{c.statement}</td>
                         <td className="mono">U{c.unit}</td>
-                        <td className="mono">L{c.btl}</td>
+                        <td className="mono">
+                          {locked ? (
+                            `L${c.btl}`
+                          ) : (
+                            <select
+                              aria-label={`Override BTL for ${c.code}`}
+                              className="field field-sm mono"
+                              disabled={busy}
+                              value={c.btl}
+                              onChange={(e) => void overrideOutcomeBtl(c.id, Number(e.target.value))}
+                            >
+                              {[1, 2, 3, 4, 5, 6].map((b) => (
+                                <option key={b} value={b}>
+                                  L{b}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </td>
                         {!locked ? (
                           <td style={{ textAlign: 'right' }}>
                             <button
@@ -559,20 +610,13 @@ export function CourseSetupStep({
                     style={{ width: 60 }}
                   />
                 </label>
-                <label className="field-label">
-                  BTL
-                  <select
-                    className="field field-sm mono"
-                    value={newCoBtl}
-                    onChange={(e) => setNewCoBtl(Number(e.target.value))}
-                  >
-                    {[1, 2, 3, 4, 5, 6].map((b) => (
-                      <option key={b} value={b}>
-                        L{b}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <span
+                  className="mono"
+                  style={{ fontSize: 11, color: 'var(--assist)', paddingBottom: 6 }}
+                  title="Automatically analyzed by Assist; can be overridden in the table above"
+                >
+                  Assist BTL: L{inferredBloom.btl} ({inferredBloom.label})
+                </span>
                 <button type="submit" className="btn field-sm" disabled={busy}>
                   Add CO
                 </button>
