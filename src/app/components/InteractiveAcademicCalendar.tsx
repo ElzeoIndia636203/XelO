@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Card } from '../../components/ui';
 import { errorMessage } from '../../lib/errors';
 import { formatDateTimeIst } from '../../lib/format';
+import { useSession } from '../../lib/session';
 import { supabase } from '../../lib/supabase';
 
 export interface CalendarMeetingItem {
@@ -23,6 +24,13 @@ interface ContactOption {
   email: string;
   role: string;
   relation: 'superior' | 'subordinate';
+}
+
+interface BusyDayItem {
+  id: string;
+  user_id: string;
+  day: string;
+  reason: string;
 }
 
 export interface CalendarOverlayEvent {
@@ -87,26 +95,49 @@ export function InteractiveAcademicCalendar({
   onSelectDateForEvent?: (isoDate: string) => void;
   onJumpToNotifications?: () => void;
 }) {
+  const { profile } = useSession();
   const [month, setMonth] = useState(() => initialMonth || new Date().toISOString().slice(0, 7));
   const [meetings, setMeetings] = useState<CalendarMeetingItem[]>([]);
   const [contacts, setContacts] = useState<ContactOption[]>([]);
+  const [myBusyDays, setMyBusyDays] = useState<BusyDayItem[]>([]);
+  const [recipientBusyDays, setRecipientBusyDays] = useState<BusyDayItem[]>([]);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [actionMode, setActionMode] = useState<'meeting_request' | 'meeting_scheduled' | 'notify'>('meeting_request');
   const [recipientId, setRecipientId] = useState('');
   const [meetingTitle, setMeetingTitle] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [busyReason, setBusyReason] = useState('Busy');
   const [timeStr, setTimeStr] = useState('10:30');
   const [duration, setDuration] = useState(30);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
+  const rolesList = profile?.roles?.length ? profile.roles : profile?.role ? [profile.role] : [];
+  const canBlockBusy = rolesList.some((r) => ['faculty', 'hod', 'dean', 'coe', 'vc', 'super_admin'].includes(r));
+  const hasSuperiors = contacts.some((c) => c.relation === 'superior');
+  const hasSubordinates = contacts.some((c) => c.relation === 'subordinate');
+  const effectiveMode =
+    actionMode === 'meeting_request' && !hasSuperiors && hasSubordinates
+      ? 'meeting_scheduled'
+      : actionMode !== 'meeting_request' && !hasSubordinates && hasSuperiors
+        ? 'meeting_request'
+        : actionMode;
+  const filteredContacts = contacts.filter((c) =>
+    effectiveMode === 'meeting_request' ? c.relation === 'superior' : c.relation === 'subordinate',
+  );
+  const activeRecipient =
+    filteredContacts.find((c) => c.id === recipientId)?.id ?? filteredContacts[0]?.id ?? '';
+
   const fetchCalendarData = useCallback(async () => {
-    const [{ data: mData }, { data: cData }] = await Promise.all([
+    const [{ data: mData }, { data: cData }, { data: bData }] = await Promise.all([
       supabase.rpc('calendar_approved_meetings'),
       supabase.rpc('list_hierarchy_contacts'),
+      supabase.rpc('list_busy_days'),
     ]);
     return {
       meetings: (mData ?? []) as CalendarMeetingItem[],
       contacts: (cData ?? []) as ContactOption[],
+      busyDays: (bData ?? []) as BusyDayItem[],
     };
   }, []);
 
@@ -116,31 +147,72 @@ export function InteractiveAcademicCalendar({
       if (cancelled) return;
       setMeetings(res.meetings);
       setContacts(res.contacts);
-      if (res.contacts.length > 0) {
-        setRecipientId((prev) => prev || res.contacts[0]!.id);
-      }
+      setMyBusyDays(res.busyDays);
     });
     return () => {
       cancelled = true;
     };
   }, [fetchCalendarData]);
 
-  async function submitMeetingFromDay(e: React.FormEvent) {
-    e.preventDefault();
-    if (!selectedDay || !recipientId || !meetingTitle.trim() || !purpose.trim()) {
-      setMsg({ text: 'Select a contact and enter both title and purpose.', ok: false });
+  useEffect(() => {
+    let cancelled = false;
+    if (effectiveMode !== 'meeting_request' || !activeRecipient) {
       return;
     }
-    const target = contacts.find((c) => c.id === recipientId);
+    void supabase
+      .rpc('list_busy_days', { p_user_id: activeRecipient })
+      .then(({ data }) => {
+        if (!cancelled && Array.isArray(data)) {
+          setRecipientBusyDays(data as BusyDayItem[]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveMode, activeRecipient]);
+
+  async function toggleBusyForSelectedDay() {
+    if (!selectedDay) return;
+    setBusy(true);
+    setMsg(null);
+    const { data, error } = await supabase.rpc('toggle_busy_day', {
+      p_day: selectedDay,
+      p_reason: busyReason.trim() || 'Busy',
+    });
+    setBusy(false);
+    if (error) {
+      setMsg({ text: errorMessage(error.message), ok: false });
+      return;
+    }
+    const nowBusy = Boolean(data);
+    setMsg({
+      text: nowBusy
+        ? `Marked ${selectedDay} as Busy. Incoming meeting requests on this day are blocked.`
+        : `Removed Busy block on ${selectedDay}.`,
+      ok: true,
+    });
+    const refreshed = await fetchCalendarData();
+    setMyBusyDays(refreshed.busyDays);
+  }
+
+  async function submitMeetingFromDay(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedDay || !activeRecipient || !meetingTitle.trim() || (effectiveMode !== 'notify' && !purpose.trim())) {
+      setMsg({ text: 'Select a contact and enter required subject/purpose.', ok: false });
+      return;
+    }
+    const target = filteredContacts.find((c) => c.id === activeRecipient);
     if (!target) return;
-    const kind = target.relation === 'superior' ? 'meeting_request' : 'meeting_scheduled';
-    const scheduledIso = new Date(`${selectedDay}T${timeStr || '10:30'}:00+05:30`).toISOString();
+    const scheduledIso =
+      effectiveMode === 'notify'
+        ? null
+        : new Date(`${selectedDay}T${timeStr || '10:30'}:00+05:30`).toISOString();
 
     setBusy(true);
     setMsg(null);
     const { error } = await supabase.rpc('send_hierarchy_message', {
-      p_recipient_id: recipientId,
-      p_kind: kind,
+      p_recipient_id: activeRecipient,
+      p_kind: effectiveMode,
       p_title: meetingTitle.trim(),
       p_scheduled_at: scheduledIso,
       p_note: '',
@@ -156,9 +228,11 @@ export function InteractiveAcademicCalendar({
     setPurpose('');
     setMsg({
       text:
-        kind === 'meeting_request'
+        effectiveMode === 'meeting_request'
           ? `Meeting request (${duration} min) sent to ${target.full_name} for ${selectedDay}.`
-          : `Meeting scheduled (${duration} min) with ${target.full_name} on ${selectedDay}.`,
+          : effectiveMode === 'meeting_scheduled'
+            ? `Meeting scheduled (${duration} min) with ${target.full_name} on ${selectedDay}.`
+            : `Notification sent to ${target.full_name}.`,
       ok: true,
     });
     const refreshed = await fetchCalendarData();
@@ -181,6 +255,11 @@ export function InteractiveAcademicCalendar({
     ? meetings.filter((m) => m.scheduled_at.slice(0, 10) === selectedDay)
     : [];
   const dayEvents = selectedDay ? events.filter((ev) => ev.day === selectedDay) : [];
+  const selectedDayBusy = selectedDay ? myBusyDays.find((b) => b.day === selectedDay) : undefined;
+  const recipientBusyOnSelected =
+    effectiveMode === 'meeting_request' && selectedDay
+      ? recipientBusyDays.find((b) => b.day === selectedDay)
+      : undefined;
 
   return (
     <Card
@@ -215,6 +294,7 @@ export function InteractiveAcademicCalendar({
           { label: 'Academic event', bg: '#E0F2FE', border: '#0284C7', color: '#0369A1' },
           { label: 'No-attendance', bg: '#FFEDD5', border: '#EA580C', color: '#C2410C' },
           { label: 'Approved meeting', bg: '#CCFBF1', border: '#0D9488', color: '#0F766E' },
+          { label: 'Busy', bg: '#FEF9C3', border: '#CA8A04', color: '#854D0E' },
           { label: 'Sat off / Sun', bg: '#EEF2FF', border: '#C7D2FE', color: '#4338CA' },
         ].map((item) => (
           <span
@@ -248,6 +328,7 @@ export function InteractiveAcademicCalendar({
           }
           const cellMeetings = meetings.filter((m) => m.scheduled_at.slice(0, 10) === iso);
           const cellEvents = events.filter((ev) => ev.day === iso);
+          const cellBusy = myBusyDays.find((b) => b.day === iso);
           const isSelected = selectedDay === iso;
           const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
           const isSunday = dow === 0;
@@ -263,8 +344,10 @@ export function InteractiveAcademicCalendar({
           );
           const hasAcademicEv = cellEvents.some((e) => e.kind === 'academic_event');
           const cellBg =
-            cellMeetings.length > 0
-              ? '#CCFBF1'
+            cellBusy
+              ? '#FEF9C3'
+              : cellMeetings.length > 0
+                ? '#CCFBF1'
               : hasNoAtt
                 ? '#FFEDD5'
                 : hasExam
@@ -358,6 +441,11 @@ export function InteractiveAcademicCalendar({
                   {mt.title} ({mt.duration_minutes}m)
                 </span>
               ))}
+              {cellBusy && (
+                <span style={{ fontSize: 10, color: '#854D0E', fontWeight: 700, overflowWrap: 'anywhere' }}>
+                  Busy: {cellBusy.reason}
+                </span>
+              )}
             </button>
           );
         })}
@@ -418,43 +506,98 @@ export function InteractiveAcademicCalendar({
             </div>
           )}
 
+          {canBlockBusy && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: 8, borderRadius: 6, background: '#FEF9C3', border: '1px solid #CA8A04' }}>
+              {selectedDayBusy ? (
+                <>
+                  <span style={{ fontSize: 12, color: '#854D0E', fontWeight: 600 }}>
+                    You blocked {selectedDay} as Busy ({selectedDayBusy.reason}) — incoming meeting requests are blocked.
+                  </span>
+                  <button type="button" className="btn field-sm" disabled={busy} onClick={() => void toggleBusyForSelectedDay()}>
+                    Unblock Busy day
+                  </button>
+                </>
+              ) : (
+                <>
+                  <input
+                    className="field field-sm"
+                    value={busyReason}
+                    onChange={(e) => setBusyReason(e.target.value)}
+                    placeholder="Reason (e.g. Lab Evaluation / Out of office)"
+                    style={{ flex: '1 1 200px' }}
+                  />
+                  <button type="button" className="btn field-sm" disabled={busy} onClick={() => void toggleBusyForSelectedDay()}>
+                    Block day as Busy
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           {contacts.length > 0 ? (
-            <form onSubmit={submitMeetingFromDay} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-              <label className="field-label" style={{ minWidth: 200 }}>
-                Contact
-                <select className="field field-sm" value={recipientId} onChange={(e) => setRecipientId(e.target.value)}>
-                  {contacts.map((c) => (
-                    <option key={`${c.id}-${c.relation}`} value={c.id}>
-                      {c.full_name} ({c.role.toUpperCase()} · {c.relation === 'superior' ? 'Request' : 'Schedule'})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field-label" style={{ flex: '1 1 160px' }}>
-                Meeting title
-                <input className="field field-sm" value={meetingTitle} onChange={(e) => setMeetingTitle(e.target.value)} placeholder="e.g. Lab doubt / Course review" />
-              </label>
-              <label className="field-label" style={{ flex: '1 1 200px' }}>
-                Purpose
-                <input className="field field-sm" value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="Reason / agenda for meeting" />
-              </label>
-              <label className="field-label">
-                Time (IST)
-                <input className="field field-sm mono" type="time" value={timeStr} onChange={(e) => setTimeStr(e.target.value)} />
-              </label>
-              <label className="field-label">
-                Duration
-                <select className="field field-sm" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-                  {[15, 30, 45, 60, 90].map((m) => (
-                    <option key={m} value={m}>
-                      {m} min
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button type="submit" className="btn btn-primary field-sm" disabled={busy}>
-                {busy ? 'Sending…' : 'Send / Schedule'}
-              </button>
+            <form onSubmit={submitMeetingFromDay} style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
+                <label className="field-label">
+                  Action
+                  <select
+                    className="field field-sm"
+                    value={effectiveMode}
+                    onChange={(e) => setActionMode(e.target.value as 'meeting_request' | 'meeting_scheduled' | 'notify')}
+                  >
+                    {hasSuperiors && <option value="meeting_request">Request meeting (Higher hierarchy)</option>}
+                    {hasSubordinates && <option value="meeting_scheduled">Schedule meeting (Lower hierarchy)</option>}
+                    {hasSubordinates && <option value="notify">Send notification (Lower hierarchy)</option>}
+                  </select>
+                </label>
+                <label className="field-label" style={{ minWidth: 200 }}>
+                  Recipient
+                  <select className="field field-sm" value={activeRecipient} onChange={(e) => setRecipientId(e.target.value)}>
+                    {filteredContacts.length === 0 ? (
+                      <option value="">No eligible contacts</option>
+                    ) : (
+                      filteredContacts.map((c) => (
+                        <option key={`${c.id}-${c.relation}`} value={c.id}>
+                          {c.full_name} ({c.role.toUpperCase()})
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+                <label className="field-label" style={{ flex: '1 1 160px' }}>
+                  {effectiveMode === 'notify' ? 'Subject' : 'Meeting title'}
+                  <input className="field field-sm" value={meetingTitle} onChange={(e) => setMeetingTitle(e.target.value)} placeholder="e.g. Lab doubt / Course review" />
+                </label>
+                {effectiveMode !== 'notify' && (
+                  <>
+                    <label className="field-label" style={{ flex: '1 1 180px' }}>
+                      Purpose
+                      <input className="field field-sm" value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="Reason / agenda" />
+                    </label>
+                    <label className="field-label">
+                      Time (IST)
+                      <input className="field field-sm mono" type="time" value={timeStr} onChange={(e) => setTimeStr(e.target.value)} />
+                    </label>
+                    <label className="field-label">
+                      Duration
+                      <select className="field field-sm" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+                        {[15, 30, 45, 60, 90].map((m) => (
+                          <option key={m} value={m}>
+                            {m} min
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
+                <button type="submit" className="btn btn-primary field-sm" disabled={busy || !activeRecipient || Boolean(recipientBusyOnSelected)}>
+                  {busy ? 'Sending…' : effectiveMode === 'meeting_request' ? 'Request' : effectiveMode === 'meeting_scheduled' ? 'Schedule' : 'Notify'}
+                </button>
+              </div>
+              {recipientBusyOnSelected && (
+                <div style={{ fontSize: 12, color: '#B45309', fontWeight: 600 }}>
+                  This recipient has blocked {selectedDay} as Busy ({recipientBusyOnSelected.reason}). Meeting requests cannot be placed on this day.
+                </div>
+              )}
             </form>
           ) : (
             <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6, borderTop: '1px solid var(--border)' }}>

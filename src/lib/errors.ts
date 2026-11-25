@@ -1,6 +1,7 @@
 const MESSAGES: Record<string, string> = {
   forbidden: 'You do not have permission to perform this action.',
   not_pending: 'This item is no longer pending.',
+  recipient_busy_on_day: 'The recipient has blocked this day as busy. Please choose another date.',
   remark_required: 'Please enter a remark before declining or returning.',
   rubric_must_total_50: 'Rubric weights must total 50 marks.',
   not_onboarded:
