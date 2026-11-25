@@ -5,16 +5,25 @@ import { formatDateIst } from '../../../lib/format';
 import { rpc } from '../../../lib/supabase';
 import type { Department, Institution, School } from '../../../lib/types';
 
+export interface CourseProgrammeInfo {
+  id: string;
+  institution_id: string;
+  department_id: string | null;
+  programme: string;
+}
+
 export function InstitutionsTab({
   institutions,
   schools,
   departments,
+  courses = [],
   onNotify,
   onRefresh,
 }: {
   institutions: readonly Institution[];
   schools: readonly School[];
   departments: readonly Department[];
+  courses?: readonly CourseProgrammeInfo[];
   onNotify: (msg: string, ok: boolean) => void;
   onRefresh: () => Promise<void>;
 }) {
@@ -276,6 +285,59 @@ export function InstitutionsTab({
           </div>
         </Card>
       )}
+      {departments.length > 0 ? (
+        <Card title="Departments & registered programmes" flush>
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Institution</th>
+                  <th>School</th>
+                  <th>Code</th>
+                  <th>Department</th>
+                  <th>Registered programmes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {departments.map((dept) => {
+                  const instName = institutions.find((i) => i.id === dept.institution_id)?.name ?? '—';
+                  const schoolName = schools.find((s) => s.id === dept.school_id)?.name ?? '—';
+                  const progs = Array.from(
+                    new Set(
+                      courses
+                        .filter((c) => c.department_id === dept.id && c.programme.trim() !== '')
+                        .map((c) => c.programme.trim()),
+                    ),
+                  ).sort();
+                  return (
+                    <tr key={dept.id}>
+                      <td style={{ fontSize: 12 }}>{instName}</td>
+                      <td style={{ fontSize: 12, color: 'var(--muted)' }}>{schoolName}</td>
+                      <td className="mono" style={{ fontSize: 12 }}>
+                        {dept.code}
+                      </td>
+                      <td style={{ fontWeight: 500 }}>{dept.name}</td>
+                      <td>
+                        {progs.length === 0 ? (
+                          <span style={{ fontSize: 12, color: 'var(--muted)' }}>No programmes registered yet</span>
+                        ) : (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {progs.map((p) => (
+                              <Chip key={p} tone="neutral">
+                                {p}
+                              </Chip>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
     </div>
   );
 }

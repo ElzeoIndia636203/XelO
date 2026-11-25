@@ -47,6 +47,13 @@ const TAB_META: Record<AdminTab, { title: string; lead: string }> = {
   },
 };
 
+type CourseProgrammeRow = {
+  id: string;
+  institution_id: string;
+  department_id: string | null;
+  programme: string;
+};
+
 export function AdminConsole() {
   const { profile, signOut } = useSession();
   const [params, setParams] = useSearchParams();
@@ -55,7 +62,7 @@ export function AdminConsole() {
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
 
   const { data, loading, error, reload } = useLoad(async () => {
-    const [institutions, schools, departments, profiles, invites, plans, requests, credits, audit] =
+    const [institutions, schools, departments, profiles, invites, plans, requests, credits, audit, courses] =
       await Promise.all([
         fetchAll<Institution>((from, to) =>
           supabase.from('institutions').select('*').order('name').range(from, to),
@@ -89,6 +96,9 @@ export function AdminConsole() {
         ),
         rpc<AiUsageReportRow[]>('ai_usage_report'),
         rpc<AuditFeedRow[]>('admin_audit_feed', { p_limit: 200 }),
+        fetchAll<CourseProgrammeRow>((from, to) =>
+          supabase.from('courses').select('id, institution_id, department_id, programme').range(from, to),
+        ).catch(() => [] as CourseProgrammeRow[]),
       ]);
 
     return {
@@ -101,6 +111,7 @@ export function AdminConsole() {
       requests,
       credits: credits ?? [],
       audit: audit ?? [],
+      courses,
     };
   }, []);
 
@@ -163,6 +174,7 @@ export function AdminConsole() {
               institutions={data.institutions}
               schools={data.schools}
               departments={data.departments}
+              courses={data.courses}
               onNotify={notify}
               onRefresh={async () => {
                 reload();
@@ -173,6 +185,8 @@ export function AdminConsole() {
           {tab === 'subs' ? (
             <SubscriptionsTab
               institutions={data.institutions}
+              departments={data.departments}
+              courses={data.courses}
               profiles={data.profiles}
               plans={data.plans}
               requests={data.requests}

@@ -4,12 +4,14 @@ import { errorMessage } from '../../../lib/errors';
 import { formatDateIst, todayIso } from '../../../lib/format';
 import { rpc } from '../../../lib/supabase';
 import type {
+  Department,
   Institution,
   Plan,
   PlanTier,
   Profile,
   SubscriptionRequest,
 } from '../../../lib/types';
+import type { CourseProgrammeInfo } from './InstitutionsTab';
 
 function computeValidUntil(startDate: string, months: number): string {
   const d = new Date(`${startDate}T00:00:00Z`);
@@ -21,6 +23,8 @@ function computeValidUntil(startDate: string, months: number): string {
 
 export function SubscriptionsTab({
   institutions,
+  departments = [],
+  courses = [],
   profiles,
   plans,
   requests,
@@ -28,6 +32,8 @@ export function SubscriptionsTab({
   onRefresh,
 }: {
   institutions: readonly Institution[];
+  departments?: readonly Department[];
+  courses?: readonly CourseProgrammeInfo[];
   profiles: readonly Profile[];
   plans: readonly Plan[];
   requests: readonly SubscriptionRequest[];
@@ -45,6 +51,8 @@ export function SubscriptionsTab({
     elite: capEdits.elite ?? { total: elitePlan.total_cap, daily: elitePlan.daily_cap },
   };
   const [reqInstId, setReqInstId] = useState(institutions[0]?.id ?? '');
+  const [reqDeptId, setReqDeptId] = useState('');
+  const [reqProgramme, setReqProgramme] = useState('');
   const [reqPlan, setReqPlan] = useState<PlanTier>('pro');
   const [reqStart, setReqStart] = useState(todayIso());
   const [reqMonths, setReqMonths] = useState<3 | 6 | 12>(6);
@@ -55,7 +63,22 @@ export function SubscriptionsTab({
   const [busy, setBusy] = useState(false);
 
   const instMap = new Map(institutions.map((i) => [i.id, i]));
+  const deptMap = new Map(departments.map((d) => [d.id, d]));
   const profileMap = new Map(profiles.map((p) => [p.id, p]));
+  const activeReqInstId = reqInstId || institutions[0]?.id || '';
+  const reqDepts = departments.filter((d) => d.institution_id === activeReqInstId);
+  const reqProgrammes = Array.from(
+    new Set(
+      courses
+        .filter(
+          (c) =>
+            c.institution_id === activeReqInstId &&
+            (!reqDeptId || c.department_id === reqDeptId) &&
+            c.programme.trim() !== '',
+        )
+        .map((c) => c.programme.trim()),
+    ),
+  ).sort();
 
   async function saveCaps(tier: PlanTier) {
     setBusy(true);
@@ -86,12 +109,15 @@ export function SubscriptionsTab({
     setBusy(true);
     try {
       const count = Math.max(1, Math.floor(reqCount) || 1);
+      const deptLabel = reqDeptId ? deptMap.get(reqDeptId)?.code || deptMap.get(reqDeptId)?.name || 'Department' : 'All departments';
+      const progLabel = reqProgramme || 'All programmes';
+      const countLabel = `${count} ${count === 1 ? 'subscription' : 'subscriptions'}`;
       await rpc('admin_create_subscription_request', {
         p_institution_id: targetInst,
         p_plan: reqPlan,
         p_start_date: reqStart,
         p_months: reqMonths,
-        p_scope_label: `${count} ${count === 1 ? 'subscription' : 'subscriptions'}`,
+        p_scope_label: `${deptLabel} · ${progLabel} · ${countLabel}`,
       });
       setReqCount(1);
       onNotify('Subscription request recorded.', true);
@@ -218,14 +244,53 @@ export function SubscriptionsTab({
             Institution
             <select
               className="field"
-              value={reqInstId || institutions[0]?.id || ''}
-              onChange={(e) => setReqInstId(e.target.value)}
+              value={activeReqInstId}
+              onChange={(e) => {
+                setReqInstId(e.target.value);
+                setReqDeptId('');
+                setReqProgramme('');
+              }}
               style={{ minWidth: 180 }}
             >
               {institutions.length === 0 ? <option value="">No institutions</option> : null}
               {institutions.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-label">
+            Department
+            <select
+              className="field"
+              value={reqDeptId}
+              onChange={(e) => {
+                setReqDeptId(e.target.value);
+                setReqProgramme('');
+              }}
+              style={{ minWidth: 160 }}
+            >
+              <option value="">All departments</option>
+              {reqDepts.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.code} · {d.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-label">
+            Programme
+            <select
+              className="field"
+              value={reqProgramme}
+              onChange={(e) => setReqProgramme(e.target.value)}
+              style={{ minWidth: 150 }}
+            >
+              <option value="">All programmes</option>
+              {reqProgrammes.map((p) => (
+                <option key={p} value={p}>
+                  {p}
                 </option>
               ))}
             </select>
