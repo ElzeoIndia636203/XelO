@@ -1,10 +1,35 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, Chip, Empty, Kpis } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
-import { formatDateIst } from '../../../lib/format';
+import { formatDateIst, formatDateTimeIst } from '../../../lib/format';
 import { computeCreditStatus, creditTone, usagePct } from '../../../lib/logic/credits';
-import { rpc } from '../../../lib/supabase';
+import { rpc, supabase } from '../../../lib/supabase';
 import type { AiUsageReportRow, PlanTier } from '../../../lib/types';
+
+interface AiUsageHistoryRow {
+  id: string;
+  user_id: string;
+  faculty_name: string;
+  faculty_email: string;
+  institution_name: string;
+  feature: string;
+  course_code: string | null;
+  course_title: string | null;
+  status: string;
+  charged: boolean;
+  at: string;
+}
+
+const FEATURE_LABELS: Record<string, string> = {
+  outcomes: 'Course outcomes & CO-PO map',
+  lab_candidates: 'Lab question candidates',
+  bank: 'Pre/Post MCQ banks',
+  class_task: 'Classroom task',
+  announcement: 'Classroom announcement',
+  report_narrative: 'Report narrative',
+  endsem_set: 'End-sem question set',
+  feedback_loop: 'CO feedback loop',
+};
 
 export function CreditsTab({
   rows,
@@ -16,6 +41,24 @@ export function CreditsTab({
   onRefresh: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState<AiUsageHistoryRow[]>([]);
+  const [filterUserId, setFilterUserId] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase.rpc('admin_ai_usage_history', {
+        p_user_id: filterUserId || null,
+        p_limit: 100,
+      });
+      if (!cancelled && !error && Array.isArray(data)) {
+        setHistory(data as AiUsageHistoryRow[]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [filterUserId, rows]);
 
   const enriched = rows.map((r) => {
     const status = computeCreditStatus({
@@ -142,14 +185,23 @@ export function CreditsTab({
                         <Chip tone={creditTone(cr.status)}>{cr.status}</Chip>
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        <button
-                          type="button"
-                          className="btn field-sm"
-                          disabled={busy}
-                          onClick={() => void switchPlan(cr)}
-                        >
-                          {cr.tier === 'elite' ? 'Move to Pro' : 'Move to Elite'}
-                        </button>
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            onClick={() => setFilterUserId((cur) => (cur === cr.user_id ? '' : cr.user_id))}
+                          >
+                            {filterUserId === cr.user_id ? 'All history' : 'History'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            disabled={busy}
+                            onClick={() => void switchPlan(cr)}
+                          >
+                            {cr.tier === 'elite' ? 'Move to Pro' : 'Move to Elite'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -159,6 +211,77 @@ export function CreditsTab({
           </div>
         </Card>
       )}
+
+      <Card
+        title={
+          filterUserId
+            ? `Usage history — ${enriched.find((r) => r.user_id === filterUserId)?.full_name ?? 'Faculty'}`
+            : 'AI credit usage history'
+        }
+        actions={
+          filterUserId ? (
+            <button type="button" className="btn field-sm" onClick={() => setFilterUserId('')}>
+              Show all faculty
+            </button>
+          ) : null
+        }
+        flush
+      >
+        {history.length === 0 ? (
+          <div style={{ padding: 16, fontSize: 13, color: 'var(--muted)' }}>
+            No AI credit runs recorded yet.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ minWidth: 900 }}>
+              <thead>
+                <tr>
+                  <th>Time (IST)</th>
+                  <th>Faculty</th>
+                  <th>Used for</th>
+                  <th>Course</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Credit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((h) => (
+                  <tr key={h.id}>
+                    <td className="mono" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                      {formatDateTimeIst(h.at)}
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 500 }}>{h.faculty_name}</div>
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        {h.faculty_email}
+                      </div>
+                    </td>
+                    <td>{FEATURE_LABELS[h.feature] ?? h.feature}</td>
+                    <td>
+                      {h.course_code ? (
+                        <>
+                          <span className="mono" style={{ fontWeight: 600 }}>{h.course_code}</span>{' '}
+                          <span style={{ color: 'var(--muted)' }}>{h.course_title}</span>
+                        </>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td>
+                      <Chip tone={h.status === 'completed' ? 'good' : h.charged ? 'neutral' : 'warn'}>
+                        {h.status}
+                      </Chip>
+                    </td>
+                    <td className="mono" style={{ textAlign: 'right', fontSize: 12 }}>
+                      {h.charged ? '1 used' : 'Refunded'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
