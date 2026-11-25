@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Banner, Card, Chip, Modal, statusTone } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { useLoad } from '../../../lib/hooks';
-import { inferBloomLevel } from '../../../lib/logic/bloom';
+import { inferBloomLevel, inferCoPoLevels } from '../../../lib/logic/bloom';
 import { planChecks, rubricSum } from '../../../lib/logic/checks';
 import { pdfToText } from '../../../lib/pdf';
 import { fn, rpc, supabase } from '../../../lib/supabase';
@@ -77,6 +77,11 @@ export function CourseSetupStep({
   const [newCoCode, setNewCoCode] = useState(`CO${outcomes.length + 1}`);
   const [newCoStmt, setNewCoStmt] = useState('');
   const [newCoUnit, setNewCoUnit] = useState(1);
+  const [editingCoId, setEditingCoId] = useState<string | null>(null);
+  const [editCoCode, setEditCoCode] = useState('');
+  const [editCoStmt, setEditCoStmt] = useState('');
+  const [editCoUnit, setEditCoUnit] = useState(1);
+  const [editCoBtl, setEditCoBtl] = useState(3);
   const [busy, setBusy] = useState(false);
 
   const inferredBloom = inferBloomLevel(newCoStmt);
@@ -154,6 +159,80 @@ export function CourseSetupStep({
     }
   }
 
+  async function recomputeCoPoMap(
+    targetOutcomes: ReadonlyArray<{ id: string; code: string; statement: string; btl: number }>,
+  ) {
+    if (locked || targetOutcomes.length === 0) return;
+
+    const poListText = poColumns
+      .map((p) => `${p.code}${p.statement ? `: ${p.statement}` : ''}`)
+      .join('\n');
+    const coListText = targetOutcomes
+      .map((c) => `${c.code} (L${c.btl}): ${c.statement}`)
+      .join('\n');
+
+    let aiMaps: Array<{ co_code: string; po_code: string; level: number }> = [];
+    try {
+      const res = await fn<{ co_po?: Array<{ co_code: string; po_code: string; level: number }> }>(
+        'ai-generate',
+        {
+          kind: 'outcomes',
+          courseId: course.id,
+          syllabusText: `Course outcomes:\n${coListText}\n\nRegistered Department POs and PSOs:\n${poListText}`,
+        },
+      );
+      if (Array.isArray(res?.co_po)) {
+        aiMaps = res.co_po;
+      }
+    } catch {
+      // Fall back to deterministic Bloom + keyword mapping below.
+    }
+
+    const allowedPoSet = new Set(poColumns.map((p) => p.code.toUpperCase()));
+    const aiByPair = new Map<string, number>();
+    for (const m of aiMaps) {
+      const codeUpper = m.po_code.trim().toUpperCase();
+      if (allowedPoSet.has(codeUpper)) {
+        aiByPair.set(`${m.co_code.trim().toUpperCase()}:${codeUpper}`, m.level);
+      }
+    }
+
+    const upserts: Array<{
+      course_id: string;
+      institution_id: string;
+      co_id: string;
+      po_code: string;
+      level: number;
+    }> = [];
+
+    for (const co of targetOutcomes) {
+      const fallbackLevels = inferCoPoLevels(co.statement, co.btl, poColumns);
+      const fallbackMap = new Map(fallbackLevels.map((l) => [l.po_code, l.level]));
+      for (const po of poColumns) {
+        const aiLvl = aiByPair.get(`${co.code.toUpperCase()}:${po.code.toUpperCase()}`);
+        const lvl = typeof aiLvl === 'number' ? Math.max(0, Math.min(3, Math.round(aiLvl))) : (fallbackMap.get(po.code) ?? 0);
+        if (lvl > 0) {
+          upserts.push({
+            course_id: course.id,
+            institution_id: course.institution_id,
+            co_id: co.id,
+            po_code: po.code,
+            level: lvl,
+          });
+        }
+      }
+    }
+
+    const coIds = targetOutcomes.map((c) => c.id);
+    await supabase.from('co_po_map').delete().in('co_id', coIds);
+    if (upserts.length > 0) {
+      const { error } = await supabase
+        .from('co_po_map')
+        .upsert(upserts, { onConflict: 'co_id,po_code' });
+      if (error) throw new Error(error.message);
+    }
+  }
+
   async function addOutcome(e: FormEvent) {
     e.preventDefault();
     if (locked || !newCoStmt.trim()) return;
@@ -175,18 +254,69 @@ export function CourseSetupStep({
         // Local Bloom analyzer already inferred assignedBtl.
       }
 
-      const { error } = await supabase.from('course_outcomes').insert({
-        course_id: course.id,
-        institution_id: course.institution_id,
-        code: newCoCode.trim().toUpperCase(),
-        statement: newCoStmt.trim(),
-        btl: assignedBtl,
-        unit: newCoUnit,
-      });
+      const codeUpper = newCoCode.trim().toUpperCase();
+      const stmtClean = newCoStmt.trim();
+      const { data: inserted, error } = await supabase
+        .from('course_outcomes')
+        .insert({
+          course_id: course.id,
+          institution_id: course.institution_id,
+          code: codeUpper,
+          statement: stmtClean,
+          btl: assignedBtl,
+          unit: newCoUnit,
+        })
+        .select('id, code, statement, btl')
+        .single();
       if (error) throw new Error(error.message);
+
+      if (inserted) {
+        await recomputeCoPoMap([inserted as { id: string; code: string; statement: string; btl: number }]);
+      }
+
       setNewCoStmt('');
       setNewCoCode(`CO${outcomes.length + 2}`);
-      onNotify(`Outcome added (Assist assigned L${assignedBtl}).`, true);
+      onNotify(`Outcome added (Assist assigned L${assignedBtl}) and CO–PO matrix updated.`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startEditOutcome(c: CourseOutcome) {
+    setEditingCoId(c.id);
+    setEditCoCode(c.code);
+    setEditCoStmt(c.statement);
+    setEditCoUnit(c.unit);
+    setEditCoBtl(c.btl);
+  }
+
+  async function saveEditOutcome(c: CourseOutcome) {
+    if (locked || !editCoStmt.trim()) return;
+    setBusy(true);
+    try {
+      const codeUpper = editCoCode.trim().toUpperCase() || c.code;
+      const stmtClean = editCoStmt.trim();
+      const stmtChanged = stmtClean !== c.statement;
+      const btlToSave =
+        stmtChanged && editCoBtl === c.btl ? inferBloomLevel(stmtClean).btl : editCoBtl;
+
+      const { error } = await supabase
+        .from('course_outcomes')
+        .update({
+          code: codeUpper,
+          statement: stmtClean,
+          unit: editCoUnit,
+          btl: btlToSave,
+        })
+        .eq('id', c.id);
+      if (error) throw new Error(error.message);
+
+      await recomputeCoPoMap([{ id: c.id, code: codeUpper, statement: stmtClean, btl: btlToSave }]);
+      setEditingCoId(null);
+      onNotify(`Updated ${codeUpper} (L${btlToSave}) and recomputed CO–PO matrix.`, true);
       onRefresh();
     } catch (err) {
       onNotify(errorMessage(err), false);
@@ -525,23 +655,45 @@ export function CourseSetupStep({
                       </td>
                     </tr>
                   ) : (
-                    outcomes.map((c) => (
-                      <tr key={c.id}>
-                        <td className="mono" style={{ color: 'var(--muted)' }}>
-                          {c.code}
-                        </td>
-                        <td>{c.statement}</td>
-                        <td className="mono">U{c.unit}</td>
-                        <td className="mono">
-                          {locked ? (
-                            `L${c.btl}`
-                          ) : (
-                            <select
-                              aria-label={`Override BTL for ${c.code}`}
+                    outcomes.map((c) =>
+                      editingCoId === c.id && !locked ? (
+                        <tr key={c.id}>
+                          <td>
+                            <input
                               className="field field-sm mono"
-                              disabled={busy}
-                              value={c.btl}
-                              onChange={(e) => void overrideOutcomeBtl(c.id, Number(e.target.value))}
+                              aria-label="Edit CO code"
+                              value={editCoCode}
+                              onChange={(e) => setEditCoCode(e.target.value)}
+                              style={{ width: 64 }}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="field field-sm"
+                              aria-label="Edit CO statement"
+                              value={editCoStmt}
+                              onChange={(e) => setEditCoStmt(e.target.value)}
+                              style={{ width: '100%', minWidth: 160 }}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="field field-sm mono"
+                              type="number"
+                              min={1}
+                              max={10}
+                              aria-label="Edit CO unit"
+                              value={editCoUnit}
+                              onChange={(e) => setEditCoUnit(Number(e.target.value) || 1)}
+                              style={{ width: 54 }}
+                            />
+                          </td>
+                          <td>
+                            <select
+                              aria-label="Edit CO BTL"
+                              className="field field-sm mono"
+                              value={editCoBtl}
+                              onChange={(e) => setEditCoBtl(Number(e.target.value))}
                             >
                               {[1, 2, 3, 4, 5, 6].map((b) => (
                                 <option key={b} value={b}>
@@ -549,21 +701,79 @@ export function CourseSetupStep({
                                 </option>
                               ))}
                             </select>
-                          )}
-                        </td>
-                        {!locked ? (
-                          <td style={{ textAlign: 'right' }}>
-                            <button
-                              type="button"
-                              className="btn field-sm"
-                              onClick={() => void deleteOutcome(c.id)}
-                            >
-                              Remove
-                            </button>
                           </td>
-                        ) : null}
-                      </tr>
-                    ))
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <div style={{ display: 'inline-flex', gap: 6 }}>
+                              <button
+                                type="button"
+                                className="btn btn-primary field-sm"
+                                disabled={busy}
+                                onClick={() => void saveEditOutcome(c)}
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="btn field-sm"
+                                disabled={busy}
+                                onClick={() => setEditingCoId(null)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr key={c.id}>
+                          <td className="mono" style={{ color: 'var(--muted)' }}>
+                            {c.code}
+                          </td>
+                          <td>{c.statement}</td>
+                          <td className="mono">U{c.unit}</td>
+                          <td className="mono">
+                            {locked ? (
+                              `L${c.btl}`
+                            ) : (
+                              <select
+                                aria-label={`Override BTL for ${c.code}`}
+                                className="field field-sm mono"
+                                disabled={busy}
+                                value={c.btl}
+                                onChange={(e) => void overrideOutcomeBtl(c.id, Number(e.target.value))}
+                              >
+                                {[1, 2, 3, 4, 5, 6].map((b) => (
+                                  <option key={b} value={b}>
+                                    L{b}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
+                          {!locked ? (
+                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              <div style={{ display: 'inline-flex', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  className="btn field-sm"
+                                  disabled={busy}
+                                  onClick={() => startEditOutcome(c)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn field-sm"
+                                  disabled={busy}
+                                  onClick={() => void deleteOutcome(c.id)}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </td>
+                          ) : null}
+                        </tr>
+                      ),
+                    )
                   )}
                 </tbody>
               </table>
@@ -626,7 +836,34 @@ export function CourseSetupStep({
         </div>
 
         <div style={{ flex: '2 1 280px' }}>
-          <Card title="CO–PO map">
+          <Card
+            title="CO–PO map"
+            actions={
+              !locked && outcomes.length > 0 ? (
+                <button
+                  type="button"
+                  className="btn field-sm"
+                  disabled={busy}
+                  onClick={() => {
+                    void (async () => {
+                      setBusy(true);
+                      try {
+                        await recomputeCoPoMap(outcomes);
+                        onNotify('CO–PO/PSO matrix mapped with Assist.', true);
+                        onRefresh();
+                      } catch (err) {
+                        onNotify(errorMessage(err), false);
+                      } finally {
+                        setBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  Auto-map with Assist
+                </button>
+              ) : undefined
+            }
+          >
             {outcomes.length === 0 ? (
               <p style={{ fontSize: 12, color: 'var(--muted)' }}>
                 Add course outcomes to configure the CO–PO/PSO matrix.
