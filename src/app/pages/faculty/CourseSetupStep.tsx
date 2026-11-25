@@ -165,7 +165,14 @@ export function CourseSetupStep({
     if (locked || targetOutcomes.length === 0) return 'local';
 
     const poListText = poColumns
-      .map((p) => `${p.code}${p.statement ? `: ${p.statement}` : ''}`)
+      .map((p) => {
+        const desc =
+          p.statement ||
+          (p.code.toUpperCase().startsWith('PSO')
+            ? `Program Specific Outcome (${p.code}): apply core domain and programming skills to design, implement, and test software solutions`
+            : '');
+        return `${p.code}${desc ? `: ${desc}` : ''}`;
+      })
       .join('\n');
     const coListText = targetOutcomes
       .map((c) => `${c.code} (L${c.btl}): ${c.statement}`)
@@ -191,10 +198,14 @@ export function CourseSetupStep({
 
     const allowedPoSet = new Set(poColumns.map((p) => p.code.toUpperCase()));
     const aiByPair = new Map<string, number>();
+    let aiMappedAnyPso = false;
     for (const m of aiMaps) {
       const codeUpper = m.po.trim().toUpperCase();
       if (allowedPoSet.has(codeUpper)) {
         aiByPair.set(`${m.co.trim().toUpperCase()}:${codeUpper}`, m.level);
+        if (codeUpper.startsWith('PSO') && m.level > 0) {
+          aiMappedAnyPso = true;
+        }
       }
     }
 
@@ -210,12 +221,15 @@ export function CourseSetupStep({
       const fallbackLevels = inferCoPoLevels(co.statement, co.btl, poColumns);
       const fallbackMap = new Map(fallbackLevels.map((l) => [l.po_code, l.level]));
       for (const po of poColumns) {
-        const aiLvl = aiByPair.get(`${co.code.toUpperCase()}:${po.code.toUpperCase()}`);
-        const lvl = usedAi
-          ? typeof aiLvl === 'number'
-            ? Math.max(0, Math.min(3, Math.round(aiLvl)))
-            : 0
-          : (fallbackMap.get(po.code) ?? 0);
+        const poUpper = po.code.toUpperCase();
+        const aiLvl = aiByPair.get(`${co.code.toUpperCase()}:${poUpper}`);
+        const useFallbackForPso = usedAi && !aiMappedAnyPso && poUpper.startsWith('PSO');
+        const lvl =
+          usedAi && !useFallbackForPso
+            ? typeof aiLvl === 'number'
+              ? Math.max(0, Math.min(3, Math.round(aiLvl)))
+              : 0
+            : (fallbackMap.get(po.code) ?? 0);
         if (lvl > 0) {
           upserts.push({
             course_id: course.id,
