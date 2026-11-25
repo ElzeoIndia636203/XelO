@@ -318,9 +318,61 @@ export default function HodConsole() {
 
   const [loading, setLoading] = useState(false);
 
+  const loadDeptConfig = useCallback(async () => {
+    if (!profile?.department_id) return;
+    const [poRes, calRes] = await Promise.all([
+      supabase
+        .from('department_outcomes')
+        .select('id, kind, code, statement')
+        .eq('department_id', profile.department_id)
+        .order('kind', { ascending: true })
+        .order('code', { ascending: true }),
+      supabase
+        .from('academic_calendars')
+        .select('id, first_working_day, last_working_day, expected_endsem_date, saturday_rule, approved')
+        .eq('department_id', profile.department_id)
+        .maybeSingle(),
+    ]);
+
+    if (poRes.error) {
+      setErr(errorMessage(poRes.error.message));
+    } else if (poRes.data) {
+      const sorted = (poRes.data as DeptOutcomeRow[]).sort((a, b) => {
+        if (a.kind !== b.kind) return a.kind === 'PO' ? -1 : 1;
+        return a.code.localeCompare(b.code, undefined, { numeric: true });
+      });
+      setDeptOutcomes(sorted);
+      setOutcomesDirty(false);
+    }
+
+    if (!calRes.error && calRes.data) {
+      const typedCal = calRes.data as {
+        id: string;
+        first_working_day: string;
+        last_working_day: string;
+        expected_endsem_date: string | null;
+        saturday_rule: SaturdayRule;
+        approved: boolean;
+      };
+      setCalId(typedCal.id);
+      setCalFirstDay(typedCal.first_working_day);
+      setCalLastDay(typedCal.last_working_day);
+      setCalEndsemDate(typedCal.expected_endsem_date ?? '');
+      setCalSatRule(typedCal.saturday_rule);
+      setCalApproved(typedCal.approved);
+      const { data: evRows } = await supabase
+        .from('academic_calendar_events')
+        .select('id, day, kind, label')
+        .eq('calendar_id', typedCal.id)
+        .order('day');
+      setCalEvents(((evRows ?? []) as CalendarEventRow[]));
+    }
+  }, [profile]);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setErr('');
+    void loadDeptConfig();
     // load courses this HOD oversees
     const { data: rawCourses, error: ce } = await supabase
       .from('courses')
@@ -442,53 +494,8 @@ export default function HodConsole() {
       const { data: ar, error: are } = await supabase.rpc('at_risk_students', { p_course_ids: courseIds });
       if (!are) setAtRisk((ar ?? []) as AtRiskStudent[]);
     }
-
-    // department PO / PSO outcomes
-    if (profile?.department_id) {
-      const { data: poRows } = await supabase
-        .from('department_outcomes')
-        .select('id, kind, code, statement')
-        .eq('department_id', profile.department_id)
-        .order('kind', { ascending: true })
-        .order('code', { ascending: true });
-      if (poRows) {
-        const sorted = (poRows as DeptOutcomeRow[]).sort((a, b) => {
-          if (a.kind !== b.kind) return a.kind === 'PO' ? -1 : 1;
-          return a.code.localeCompare(b.code, undefined, { numeric: true });
-        });
-        setDeptOutcomes(sorted);
-      }
-
-      const { data: calRow } = await supabase
-        .from('academic_calendars')
-        .select('id, first_working_day, last_working_day, expected_endsem_date, saturday_rule, approved')
-        .eq('department_id', profile.department_id)
-        .maybeSingle();
-      if (calRow) {
-        const typedCal = calRow as {
-          id: string;
-          first_working_day: string;
-          last_working_day: string;
-          expected_endsem_date: string | null;
-          saturday_rule: SaturdayRule;
-          approved: boolean;
-        };
-        setCalId(typedCal.id);
-        setCalFirstDay(typedCal.first_working_day);
-        setCalLastDay(typedCal.last_working_day);
-        setCalEndsemDate(typedCal.expected_endsem_date ?? '');
-        setCalSatRule(typedCal.saturday_rule);
-        setCalApproved(typedCal.approved);
-        const { data: evRows } = await supabase
-          .from('academic_calendar_events')
-          .select('id, day, kind, label')
-          .eq('calendar_id', typedCal.id)
-          .order('day');
-        setCalEvents(((evRows ?? []) as CalendarEventRow[]));
-      }
-    }
     setLoading(false);
-  }, [profile]);
+  }, [loadDeptConfig]);
 
   const loadLive = useCallback(async () => {
     const courseIds = courses.map(c => c.id);
