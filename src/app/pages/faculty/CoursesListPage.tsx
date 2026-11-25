@@ -25,6 +25,7 @@ export function CoursesListPage() {
   const { profile, institution, signOut } = useSession();
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
   const [schoolId, setSchoolId] = useState('');
   const [programme, setProgramme] = useState('B.Tech');
   const [deptId, setDeptId] = useState(profile?.department_id ?? '');
@@ -73,12 +74,78 @@ export function CoursesListPage() {
     visibleDepartments[0]?.id ||
     '';
 
+  function openNewModal() {
+    setEditingCourseId(null);
+    setFormErr(null);
+    setCode('');
+    setTitle('');
+    setLtpc('0-0-2-1');
+    setProgramme('B.Tech');
+    setSemester('IV');
+    setClassYear('II Yr');
+    setYear('2026-27');
+    setLabHours(1);
+    setModalOpen(true);
+  }
+
+  function openEditModal(c: Course) {
+    setEditingCourseId(c.id);
+    setFormErr(null);
+    const dept = data?.departments.find((d) => d.id === c.department_id);
+    setSchoolId(dept?.school_id ?? '');
+    setDeptId(c.department_id ?? '');
+    setProgramme(c.programme);
+    setYear(c.academic_year);
+    setClassYear(c.section || 'II Yr');
+    setSemester(c.semester);
+    setCode(c.code);
+    setTitle(c.title);
+    setLtpc(c.ltpc);
+    setLabHours(1);
+    setModalOpen(true);
+  }
+
+  async function handleDelete(c: Course) {
+    if (!window.confirm(`Delete draft course ${c.code} · ${c.title}?`)) return;
+    setBusy(true);
+    try {
+      const { error: delErr } = await supabase.from('courses').delete().eq('id', c.id);
+      if (delErr) throw new Error(delErr.message);
+      reload();
+    } catch (err) {
+      setFormErr(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
     setFormErr(null);
     setBusy(true);
     try {
       const targetDept = activeDeptId || profile?.department_id || data?.departments[0]?.id || null;
+      if (editingCourseId) {
+        const { error: updErr } = await supabase
+          .from('courses')
+          .update({
+            code: code.trim(),
+            title: title.trim(),
+            ltpc: ltpc.trim(),
+            programme: programme.trim() || 'B.Tech',
+            semester: semester.trim(),
+            section: classYear,
+            academic_year: year.trim(),
+            department_id: targetDept,
+          })
+          .eq('id', editingCourseId);
+        if (updErr) throw new Error(updErr.message);
+        setModalOpen(false);
+        setEditingCourseId(null);
+        reload();
+        return;
+      }
+
       const newId = await rpc<string>('create_course', {
         p_code: code,
         p_title: title,
@@ -145,7 +212,7 @@ export function CoursesListPage() {
           title="My courses"
           lead="Manage lab course setup, batches, session plans, and live labs."
           actions={
-            <button type="button" className="btn btn-primary" onClick={() => setModalOpen(true)}>
+            <button type="button" className="btn btn-primary" onClick={openNewModal}>
               New course
             </button>
           }
@@ -159,7 +226,7 @@ export function CoursesListPage() {
             title="No courses yet"
             body="Create your first programming lab course to configure COs, rubric, batches, and session plan."
             action={
-              <button type="button" className="btn btn-primary" onClick={() => setModalOpen(true)}>
+              <button type="button" className="btn btn-primary" onClick={openNewModal}>
                 New course
               </button>
             }
@@ -168,32 +235,63 @@ export function CoursesListPage() {
 
         {data && data.courses.length > 0 ? (
           <div className="grid-2">
-            {data.courses.map((c) => (
-              <Card
-                key={c.id}
-                title={`${c.code} · ${c.title}`}
-                actions={<Chip tone={statusTone(c.plan_status)}>{c.plan_status}</Chip>}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div className="mono" style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    {c.section} · Sem {c.semester} · {c.academic_year} · L-T-P-C {c.ltpc}
+            {data.courses.map((c) => {
+              const canEdit = c.plan_status === 'draft' || c.plan_status === 'declined';
+              const canDelete = c.plan_status === 'draft';
+              return (
+                <Card
+                  key={c.id}
+                  title={`${c.code} · ${c.title}`}
+                  actions={<Chip tone={statusTone(c.plan_status)}>{c.plan_status}</Chip>}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div className="mono" style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      {c.section} · Sem {c.semester} · {c.academic_year} · L-T-P-C {c.ltpc}
+                    </div>
+                    {c.plan_status === 'declined' && c.plan_remark ? (
+                      <Banner tone="err">HOD remark: {c.plan_remark}</Banner>
+                    ) : null}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      <Link className="btn btn-primary" to={`/faculty/c/${c.id}/setup`}>
+                        Open workspace
+                      </Link>
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={busy}
+                          onClick={() => openEditModal(c)}
+                        >
+                          Edit
+                        </button>
+                      ) : null}
+                      {canDelete ? (
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={busy}
+                          onClick={() => void handleDelete(c)}
+                        >
+                          Delete
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
-                  {c.plan_status === 'declined' && c.plan_remark ? (
-                    <Banner tone="err">HOD remark: {c.plan_remark}</Banner>
-                  ) : null}
-                  <div>
-                    <Link className="btn btn-primary" to={`/faculty/c/${c.id}/setup`}>
-                      Open workspace
-                    </Link>
-                  </div>
-                </div>
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
           </div>
         ) : null}
       </main>
 
-      <Modal open={modalOpen} title="New lab course" onClose={() => setModalOpen(false)}>
+      <Modal
+        open={modalOpen}
+        title={editingCourseId ? 'Edit lab course' : 'New lab course'}
+        onClose={() => {
+          setModalOpen(false);
+          setEditingCourseId(null);
+        }}
+      >
         <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {formErr ? <Banner tone="err">{formErr}</Banner> : null}
           <div className="grid-2">
@@ -331,7 +429,7 @@ export function CoursesListPage() {
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? 'Creating…' : 'Create course'}
+              {busy ? (editingCourseId ? 'Saving…' : 'Creating…') : editingCourseId ? 'Save changes' : 'Create course'}
             </button>
           </div>
         </form>

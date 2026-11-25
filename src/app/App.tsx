@@ -1,56 +1,110 @@
-import { lazy, Suspense } from 'react';
-import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
-import { Loading } from '../components/ui';
+import { lazy, Suspense, type ComponentType } from 'react';
+import {
+  createBrowserRouter,
+  Navigate,
+  RouterProvider,
+  useRouteError,
+} from 'react-router-dom';
+import { Card, Loading } from '../components/ui';
 import { SessionProvider, useSession } from '../lib/session';
 import { homeForRole } from '../lib/logic/routing';
 import { RequireRole } from './components/RequireRole';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
-const AdminConsole = lazy(() => import('./pages/admin/AdminConsole'));
-const FacultyCoursesList = lazy(() => import('./pages/faculty/CoursesListPage'));
-const FacultyWorkspace = lazy(() => import('./pages/faculty/FacultyWorkspace'));
-const StudentHome = lazy(() =>
+const CHUNK_RELOAD_KEY = 'xeio_chunk_reload';
+
+function lazyRetry<T extends ComponentType<object>>(
+  loader: () => Promise<{ default: T }>,
+) {
+  return lazy(async () => {
+    try {
+      const mod = await loader();
+      window.sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+      return mod;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isChunkError =
+        msg.includes('Importing a module script failed') ||
+        msg.includes('Failed to fetch dynamically imported module') ||
+        msg.includes('error loading dynamically imported module');
+      if (isChunkError && window.sessionStorage.getItem(CHUNK_RELOAD_KEY) !== '1') {
+        window.sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {});
+      }
+      throw err;
+    }
+  });
+}
+
+function RouteErrorBoundary() {
+  const err = useRouteError();
+  const msg = err instanceof Error ? err.message : 'Something went wrong while loading this page.';
+  return (
+    <main style={{ maxWidth: 520, margin: '64px auto', padding: '0 16px' }}>
+      <Card title="Could not open page">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>{msg}</p>
+          <div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => window.location.reload()}
+            >
+              Reload page
+            </button>
+          </div>
+        </div>
+      </Card>
+    </main>
+  );
+}
+
+const AdminConsole = lazyRetry(() => import('./pages/admin/AdminConsole'));
+const FacultyCoursesList = lazyRetry(() => import('./pages/faculty/CoursesListPage'));
+const FacultyWorkspace = lazyRetry(() => import('./pages/faculty/FacultyWorkspace'));
+const StudentHome = lazyRetry(() =>
   import('./pages/student/StudentHomePage').then((m) => ({ default: m.StudentHomePage })),
 );
-const StudentLab = lazy(() =>
+const StudentLab = lazyRetry(() =>
   import('./pages/student/StudentLabPage').then((m) => ({ default: m.StudentLabPage })),
 );
-const StudentTest = lazy(() =>
+const StudentTest = lazyRetry(() =>
   import('./pages/student/TestAttemptPage').then((m) => ({ default: m.TestAttemptPage })),
 );
-const StudentClassroom = lazy(() =>
+const StudentClassroom = lazyRetry(() =>
   import('./pages/student/StudentClassroomPage').then((m) => ({
     default: m.StudentClassroomPage,
   })),
 );
-const StudentLabFile = lazy(() =>
+const StudentLabFile = lazyRetry(() =>
   import('./pages/student/StudentLabFilePage').then((m) => ({
     default: m.StudentLabFilePage,
   })),
 );
-const FacultyStudentLabFile = lazy(() =>
+const FacultyStudentLabFile = lazyRetry(() =>
   import('./pages/student/StudentLabFilePage').then((m) => ({
     default: m.FacultyStudentLabFilePage,
   })),
 );
-const PublicVerify = lazy(() =>
+const PublicVerify = lazyRetry(() =>
   import('./pages/PublicVerifyPage').then((m) => ({
     default: m.PublicVerifyPage,
   })),
 );
-const StudentEndsem = lazy(() =>
+const StudentEndsem = lazyRetry(() =>
   import('./pages/student/StudentEndsemPage').then((m) => ({
     default: m.StudentEndsemPage,
   })),
 );
-const StudentProctoredIde = lazy(() =>
+const StudentProctoredIde = lazyRetry(() =>
   import('./pages/student/StudentProctoredIdePage').then((m) => ({
     default: m.StudentProctoredIdePage,
   })),
 );
-const HodConsole = lazy(() => import('./pages/hod/HodConsole'));
-const OversightConsole = lazy(() => import('./pages/oversight/OversightConsole'));
+const HodConsole = lazyRetry(() => import('./pages/hod/HodConsole'));
+const OversightConsole = lazyRetry(() => import('./pages/oversight/OversightConsole'));
 
 function RootRedirect() {
   const { session, profile, restored } = useSession();
@@ -73,7 +127,10 @@ function LazyWrap({ children }: { children: React.ReactNode }) {
 
 const router = createBrowserRouter(
   [
-    { path: '/', element: <RootRedirect /> },
+    {
+      errorElement: <RouteErrorBoundary />,
+      children: [
+        { path: '/', element: <RootRedirect /> },
     { path: '/login', element: <LoginPage /> },
     {
       path: '/admin',
@@ -233,7 +290,9 @@ const router = createBrowserRouter(
         </RequireRole>
       ),
     },
-    { path: '*', element: <NotFoundPage /> },
+        { path: '*', element: <NotFoundPage /> },
+      ],
+    },
   ],
   { basename: '/app' },
 );
