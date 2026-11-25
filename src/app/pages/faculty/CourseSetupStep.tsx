@@ -161,8 +161,8 @@ export function CourseSetupStep({
 
   async function recomputeCoPoMap(
     targetOutcomes: ReadonlyArray<{ id: string; code: string; statement: string; btl: number }>,
-  ) {
-    if (locked || targetOutcomes.length === 0) return;
+  ): Promise<'ai' | 'local'> {
+    if (locked || targetOutcomes.length === 0) return 'local';
 
     const poListText = poColumns
       .map((p) => `${p.code}${p.statement ? `: ${p.statement}` : ''}`)
@@ -171,18 +171,19 @@ export function CourseSetupStep({
       .map((c) => `${c.code} (L${c.btl}): ${c.statement}`)
       .join('\n');
 
-    let aiMaps: Array<{ co_code: string; po_code: string; level: number }> = [];
+    let aiMaps: Array<{ co: string; po: string; level: number }> = [];
+    let usedAi = false;
     try {
-      const res = await fn<{ co_po?: Array<{ co_code: string; po_code: string; level: number }> }>(
-        'ai-generate',
-        {
-          kind: 'outcomes',
-          courseId: course.id,
-          syllabusText: `Course outcomes:\n${coListText}\n\nRegistered Department POs and PSOs:\n${poListText}`,
-        },
-      );
-      if (Array.isArray(res?.co_po)) {
-        aiMaps = res.co_po;
+      const res = await fn<{
+        draft?: { map?: Array<{ co: string; po: string; level: number }> };
+      }>('ai-generate', {
+        kind: 'outcomes',
+        course_id: course.id,
+        syllabus: `Analyze and map these Course Outcomes consistently against the Registered Department POs and PSOs. Recheck consistency so COs with similar scope and BTL have consistent strengths:\n\nCourse Outcomes:\n${coListText}\n\nRegistered Department POs and PSOs:\n${poListText}`,
+      });
+      if (Array.isArray(res?.draft?.map) && res.draft.map.length > 0) {
+        aiMaps = res.draft.map;
+        usedAi = true;
       }
     } catch {
       // Fall back to deterministic Bloom + keyword mapping below.
@@ -191,9 +192,9 @@ export function CourseSetupStep({
     const allowedPoSet = new Set(poColumns.map((p) => p.code.toUpperCase()));
     const aiByPair = new Map<string, number>();
     for (const m of aiMaps) {
-      const codeUpper = m.po_code.trim().toUpperCase();
+      const codeUpper = m.po.trim().toUpperCase();
       if (allowedPoSet.has(codeUpper)) {
-        aiByPair.set(`${m.co_code.trim().toUpperCase()}:${codeUpper}`, m.level);
+        aiByPair.set(`${m.co.trim().toUpperCase()}:${codeUpper}`, m.level);
       }
     }
 
@@ -210,7 +211,11 @@ export function CourseSetupStep({
       const fallbackMap = new Map(fallbackLevels.map((l) => [l.po_code, l.level]));
       for (const po of poColumns) {
         const aiLvl = aiByPair.get(`${co.code.toUpperCase()}:${po.code.toUpperCase()}`);
-        const lvl = typeof aiLvl === 'number' ? Math.max(0, Math.min(3, Math.round(aiLvl))) : (fallbackMap.get(po.code) ?? 0);
+        const lvl = usedAi
+          ? typeof aiLvl === 'number'
+            ? Math.max(0, Math.min(3, Math.round(aiLvl)))
+            : 0
+          : (fallbackMap.get(po.code) ?? 0);
         if (lvl > 0) {
           upserts.push({
             course_id: course.id,
@@ -231,6 +236,7 @@ export function CourseSetupStep({
         .upsert(upserts, { onConflict: 'co_id,po_code' });
       if (error) throw new Error(error.message);
     }
+    return usedAi ? 'ai' : 'local';
   }
 
   async function addOutcome(e: FormEvent) {
@@ -241,12 +247,12 @@ export function CourseSetupStep({
       let assignedBtl: number = inferredBloom.btl;
       // Try Assist AI classification when available; fall back seamlessly to local Bloom analyzer.
       try {
-        const res = await fn<{ outcomes?: Array<{ btl?: number }> }>('ai-generate', {
+        const res = await fn<{ draft?: { outcomes?: Array<{ btl?: number }> } }>('ai-generate', {
           kind: 'outcomes',
-          courseId: course.id,
-          syllabusText: newCoStmt.trim(),
+          course_id: course.id,
+          syllabus: `Classify the Bloom's Taxonomy level (1..6) for this Course Outcome:\n${newCoStmt.trim()}`,
         });
-        const aiBtl = res?.outcomes?.[0]?.btl;
+        const aiBtl = res?.draft?.outcomes?.[0]?.btl;
         if (typeof aiBtl === 'number' && aiBtl >= 1 && aiBtl <= 6) {
           assignedBtl = aiBtl;
         }
@@ -848,8 +854,13 @@ export function CourseSetupStep({
                     void (async () => {
                       setBusy(true);
                       try {
-                        await recomputeCoPoMap(outcomes);
-                        onNotify('CO–PO/PSO matrix mapped with Assist.', true);
+                        const mode = await recomputeCoPoMap(outcomes);
+                        onNotify(
+                          mode === 'ai'
+                            ? 'CO–PO/PSO matrix mapped with Assist AI (1 credit used).'
+                            : 'CO–PO/PSO matrix mapped locally (configure Gemini key + credits for Assist AI).',
+                          true,
+                        );
                         onRefresh();
                       } catch (err) {
                         onNotify(errorMessage(err), false);

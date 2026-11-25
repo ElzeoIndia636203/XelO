@@ -104,8 +104,8 @@ Deno.serve(async (req: Request) => {
       const draft = await callLlmJson(
         {
           system:
-            'You are XeIO Assist. Return ONLY valid JSON with shape {"outcomes":[{"code":"CO1","statement":"...","btl":3,"unit":1}],"map":[{"co":"CO1","po":"PO1","level":3}]}. Use CO1..CO6, BTL 1..6, unit 1..6, PO codes PO1..PO12 or PSO1..PSO2, and levels 0..3.',
-          user: `Course: ${course.code} ${course.title}\n\nSyllabus:\n${parsed.data.syllabus}`,
+            'You are XeIO Assist, an NBA/NAAC outcome-based education expert. Return ONLY valid JSON with shape {"outcomes":[{"code":"CO1","statement":"...","btl":3,"unit":1}],"map":[{"co":"CO1","po":"PO1","level":3}]}. Rules: (1) Carefully analyze each CO statement, its Bloom level (BTL 1..6), and the exact PO/PSO definitions provided. (2) Map ONLY to the PO/PSO codes provided (or PO1..PO11, PSO1..PSO2 if none listed). (3) Assign strength 1 (low), 2 (moderate), 3 (high), or omit/0 if not directly addressed. Do NOT map non-technical POs (ethics, environment, society, communication, project management) unless the CO explicitly covers them. (4) Recheck the entire matrix before finalizing: COs with similar technical scope and the same BTL level must have consistent, balanced mapping strengths.',
+          user: `Course: ${course.code} ${course.title}\n\n${parsed.data.syllabus}`,
         },
         validateOutcomesDraft,
       );
