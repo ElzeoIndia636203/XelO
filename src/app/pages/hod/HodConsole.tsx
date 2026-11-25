@@ -182,11 +182,33 @@ interface RawHodNotification {
   payload: { course_code?: string; course_title?: string } | null;
 }
 
+interface DeptOutcomeRow {
+  id: string;
+  kind: 'PO' | 'PSO';
+  code: string;
+  statement: string;
+}
+
+const STANDARD_NBA_POS: ReadonlyArray<{ code: string; statement: string }> = [
+  { code: 'PO1', statement: 'Engineering knowledge' },
+  { code: 'PO2', statement: 'Problem analysis' },
+  { code: 'PO3', statement: 'Design/development of solutions' },
+  { code: 'PO4', statement: 'Conduct investigations of complex problems' },
+  { code: 'PO5', statement: 'Modern tool usage' },
+  { code: 'PO6', statement: 'The engineer and society' },
+  { code: 'PO7', statement: 'Environment and sustainability' },
+  { code: 'PO8', statement: 'Ethics' },
+  { code: 'PO9', statement: 'Individual and team work' },
+  { code: 'PO10', statement: 'Communication' },
+  { code: 'PO11', statement: 'Project management and finance' },
+  { code: 'PO12', statement: 'Life-long learning' },
+];
+
 export default function HodConsole() {
   const { profile, signOut } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = searchParams.get('tab');
-  const validTabs = ['overview', 'approvals', 'courses', 'live', 'final'] as const;
+  const validTabs = ['overview', 'approvals', 'courses', 'outcomes', 'live', 'final'] as const;
   const tab: (typeof validTabs)[number] =
     validTabs.includes(initialTab as (typeof validTabs)[number])
       ? (initialTab as (typeof validTabs)[number])
@@ -198,6 +220,11 @@ export default function HodConsole() {
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [atRisk, setAtRisk] = useState<AtRiskStudent[]>([]);
   const [liveLabs, setLiveLabs] = useState<LiveLabRow[]>([]);
+  const [deptOutcomes, setDeptOutcomes] = useState<DeptOutcomeRow[]>([]);
+  const [poKind, setPoKind] = useState<'PO' | 'PSO'>('PO');
+  const [poCode, setPoCode] = useState('');
+  const [poStmt, setPoStmt] = useState('');
+  const [poBusy, setPoBusy] = useState(false);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [remark, setRemark] = useState('');
   const [remarkFor, setRemarkFor] = useState<string | null>(null);
@@ -332,8 +359,25 @@ export default function HodConsole() {
       const { data: ar, error: are } = await supabase.rpc('at_risk_students', { p_course_ids: courseIds });
       if (!are) setAtRisk((ar ?? []) as AtRiskStudent[]);
     }
+
+    // department PO / PSO outcomes
+    if (profile?.department_id) {
+      const { data: poRows } = await supabase
+        .from('department_outcomes')
+        .select('id, kind, code, statement')
+        .eq('department_id', profile.department_id)
+        .order('kind', { ascending: true })
+        .order('code', { ascending: true });
+      if (poRows) {
+        const sorted = (poRows as DeptOutcomeRow[]).sort((a, b) => {
+          if (a.kind !== b.kind) return a.kind === 'PO' ? -1 : 1;
+          return a.code.localeCompare(b.code, undefined, { numeric: true });
+        });
+        setDeptOutcomes(sorted);
+      }
+    }
     setLoading(false);
-  }, []);
+  }, [profile]);
 
   const loadLive = useCallback(async () => {
     const courseIds = courses.map(c => c.id);
@@ -430,10 +474,81 @@ export default function HodConsole() {
     else loadAll();
   }
 
+  async function addDeptOutcome(e: React.FormEvent) {
+    e.preventDefault();
+    if (!profile?.department_id || !profile.institution_id) return;
+    const cleanCode = poCode.trim().toUpperCase();
+    const cleanStmt = poStmt.trim();
+    if (!cleanCode) {
+      setErr('Enter a PO or PSO code (e.g. PO1, PSO1).');
+      return;
+    }
+    setPoBusy(true);
+    setErr('');
+    const { error } = await supabase.from('department_outcomes').insert({
+      institution_id: profile.institution_id,
+      department_id: profile.department_id,
+      kind: poKind,
+      code: cleanCode,
+      statement: cleanStmt,
+      created_by: profile.id,
+    });
+    setPoBusy(false);
+    if (error) {
+      setErr(errorMessage(error.message));
+      return;
+    }
+    setPoCode('');
+    setPoStmt('');
+    setNotice(`${cleanCode} registered for your department.`);
+    void loadAll();
+  }
+
+  async function seedStandardPos() {
+    if (!profile?.department_id || !profile.institution_id) return;
+    const existing = new Set(deptOutcomes.map((o) => o.code.toUpperCase()));
+    const toInsert = STANDARD_NBA_POS.filter((p) => !existing.has(p.code)).map((p) => ({
+      institution_id: profile.institution_id,
+      department_id: profile.department_id,
+      kind: 'PO' as const,
+      code: p.code,
+      statement: p.statement,
+      created_by: profile.id,
+    }));
+    if (toInsert.length === 0) {
+      setNotice('All 12 standard NBA POs are already registered.');
+      return;
+    }
+    setPoBusy(true);
+    setErr('');
+    const { error } = await supabase.from('department_outcomes').insert(toInsert);
+    setPoBusy(false);
+    if (error) {
+      setErr(errorMessage(error.message));
+      return;
+    }
+    setNotice(`Added ${toInsert.length} standard NBA POs.`);
+    void loadAll();
+  }
+
+  async function deleteDeptOutcome(id: string, code: string) {
+    setPoBusy(true);
+    setErr('');
+    const { error } = await supabase.from('department_outcomes').delete().eq('id', id);
+    setPoBusy(false);
+    if (error) {
+      setErr(errorMessage(error.message));
+      return;
+    }
+    setNotice(`${code} removed.`);
+    void loadAll();
+  }
+
   const navItems: NavItem[] = [
     { id: 'overview', label: 'Overview', badge: pendingCount > 0 ? pendingCount : undefined },
     { id: 'approvals', label: 'Approvals', badge: pendingCount > 0 ? pendingCount : undefined },
     { id: 'courses',   label: 'Courses' },
+    { id: 'outcomes',  label: 'POs & PSOs' },
     { id: 'live',      label: 'Live', badge: liveCount > 0 ? liveCount : undefined },
     { id: 'final',     label: 'Final marks' },
   ];
@@ -763,6 +878,137 @@ export default function HodConsole() {
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── POs & PSOs ── */}
+      {tab === 'outcomes' && (
+        <div style={{ padding: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <h1 style={{ fontSize: '1.35rem', fontWeight: 700 }}>PO & PSO registry</h1>
+              <p style={{ fontSize: '0.84rem', color: 'var(--muted)', marginTop: 4 }}>
+                Registered POs and PSOs appear automatically in the CO–PO matrix during faculty course setup.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void seedStandardPos()}
+              disabled={poBusy}
+              style={{
+                padding: '7px 14px',
+                borderRadius: 6,
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                cursor: 'pointer',
+                fontSize: '0.84rem',
+              }}
+            >
+              Load standard NBA POs (PO1–PO12)
+            </button>
+          </div>
+
+          <form
+            onSubmit={addDeptOutcome}
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 10,
+              alignItems: 'flex-end',
+              padding: 16,
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              background: 'var(--surface)',
+              marginBottom: 20,
+            }}
+          >
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.8rem' }}>
+              Type
+              <select
+                value={poKind}
+                onChange={(e) => setPoKind(e.target.value as 'PO' | 'PSO')}
+                style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)' }}
+              >
+                <option value="PO">PO</option>
+                <option value="PSO">PSO</option>
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.8rem' }}>
+              Code
+              <input
+                value={poCode}
+                onChange={(e) => setPoCode(e.target.value)}
+                placeholder={poKind === 'PO' ? 'PO1' : 'PSO1'}
+                style={{ width: 110, padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontFamily: 'var(--mono)' }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.8rem', flex: '1 1 280px' }}>
+              Statement
+              <input
+                value={poStmt}
+                onChange={(e) => setPoStmt(e.target.value)}
+                placeholder="Engineering knowledge / Programme specific outcome description"
+                style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)' }}
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={poBusy}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 6,
+                border: 'none',
+                background: 'var(--accent)',
+                color: '#fff',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Add {poKind}
+            </button>
+          </form>
+
+          {deptOutcomes.length === 0 ? (
+            <div style={{ padding: 24, border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)' }}>
+              No POs or PSOs registered for your department yet. Add one above or load standard NBA POs.
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {['Type', 'Code', 'Statement', ''].map((h) => (
+                    <th key={h} style={{ textAlign: 'left', padding: '6px 12px', color: 'var(--muted)', fontWeight: 500 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {deptOutcomes.map((o) => (
+                  <tr key={o.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '10px 12px', fontFamily: 'var(--mono)' }}>{o.kind}</td>
+                    <td style={{ padding: '10px 12px', fontFamily: 'var(--mono)', fontWeight: 600 }}>{o.code}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{o.statement || '—'}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                      <button
+                        type="button"
+                        disabled={poBusy}
+                        onClick={() => void deleteDeptOutcome(o.id, o.code)}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: 6,
+                          border: '1px solid var(--border)',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          fontSize: '0.8rem',
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
       )}

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Banner, Card, Chip, Modal, statusTone } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
+import { useLoad } from '../../../lib/hooks';
 import { planChecks, rubricSum } from '../../../lib/logic/checks';
 import { pdfToText } from '../../../lib/pdf';
 import { fn, rpc, supabase } from '../../../lib/supabase';
@@ -15,7 +16,13 @@ const ALL_LANGS = [
   { id: 'go', label: 'Go' },
 ] as const;
 
-const PO_COLS = ['PO1', 'PO2', 'PO3', 'PO5', 'PO12', 'PSO1'] as const;
+const DEFAULT_PO_COLS = ['PO1', 'PO2', 'PO3', 'PO5', 'PO12', 'PSO1'] as const;
+
+interface DeptOutcomeDef {
+  code: string;
+  kind: 'PO' | 'PSO';
+  statement: string;
+}
 
 const RUBRIC_DEFS: ReadonlyArray<{ key: keyof RubricWeights; label: string; how: string }> = [
   { key: 'att', label: 'Attendance', how: 'Present in the session' },
@@ -83,6 +90,30 @@ export function CourseSetupStep({
   const totalRubric = rubricSum(rubric);
   const mappedRefs = coPoMap.filter((m) => m.level > 0).map((m) => m.co_id);
   const checks = planChecks(rubric, outcomes, mappedRefs);
+
+  const { data: deptOutcomes } = useLoad(async () => {
+    if (!course.department_id) return [] as DeptOutcomeDef[];
+    const { data, error } = await supabase
+      .from('department_outcomes')
+      .select('code, kind, statement')
+      .eq('department_id', course.department_id)
+      .order('kind', { ascending: true })
+      .order('code', { ascending: true });
+    if (error || !data) return [] as DeptOutcomeDef[];
+    return (data as DeptOutcomeDef[]).sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'PO' ? -1 : 1;
+      return a.code.localeCompare(b.code, undefined, { numeric: true });
+    });
+  }, [course.department_id]);
+
+  const poColumns: readonly DeptOutcomeDef[] =
+    deptOutcomes && deptOutcomes.length > 0
+      ? deptOutcomes
+      : DEFAULT_PO_COLS.map((c) => ({
+          code: c,
+          kind: c.startsWith('PSO') ? 'PSO' : 'PO',
+          statement: '',
+        }));
 
   const levelLookup = new Map<string, number>();
   for (const m of coPoMap) {
@@ -558,54 +589,62 @@ export function CourseSetupStep({
               </p>
             ) : (
               <>
-                <div
-                  role="img"
-                  aria-label="CO to PO mapping strengths"
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: `52px repeat(${PO_COLS.length}, minmax(0, 1fr))`,
-                    gap: 4,
-                    fontSize: 11,
-                  }}
-                >
-                  <div />
-                  {PO_COLS.map((po) => (
-                    <div key={po} className="mono" style={{ textAlign: 'center', color: 'var(--muted)' }}>
-                      {po}
-                    </div>
-                  ))}
-                  {outcomes.map((co) => (
-                    <div key={co.id} style={{ display: 'contents' }}>
-                      <div className="mono" style={{ padding: '6px 2px', color: 'var(--muted)' }}>
-                        {co.code}
+                <div style={{ overflowX: 'auto' }}>
+                  <div
+                    role="img"
+                    aria-label="CO to PO mapping strengths"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: `52px repeat(${poColumns.length}, minmax(42px, 1fr))`,
+                      gap: 4,
+                      fontSize: 11,
+                    }}
+                  >
+                    <div />
+                    {poColumns.map((po) => (
+                      <div
+                        key={po.code}
+                        title={po.statement || po.code}
+                        className="mono"
+                        style={{ textAlign: 'center', color: 'var(--muted)' }}
+                      >
+                        {po.code}
                       </div>
-                      {PO_COLS.map((po) => {
-                        const lvl = levelLookup.get(`${co.id}:${po}`) ?? 0;
-                        const bg = ['#F4F3EF', '#DCEBE6', '#9CC7BB', '#0E5E52'][lvl] ?? '#F4F3EF';
-                        const fg = lvl === 3 ? '#FFFFFF' : '#141413';
-                        return (
-                          <button
-                            key={`${co.id}-${po}`}
-                            type="button"
-                            disabled={locked}
-                            aria-label={`${co.code} ${po} level ${lvl}`}
-                            onClick={() => void cyclePoLevel(co.id, po)}
-                            className="mono"
-                            style={{
-                              minHeight: 28,
-                              border: '1px solid var(--border-soft)',
-                              borderRadius: 4,
-                              background: bg,
-                              color: fg,
-                              cursor: locked ? 'default' : 'pointer',
-                            }}
-                          >
-                            {lvl === 0 ? '·' : lvl}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ))}
+                    ))}
+                    {outcomes.map((co) => (
+                      <div key={co.id} style={{ display: 'contents' }}>
+                        <div className="mono" style={{ padding: '6px 2px', color: 'var(--muted)' }}>
+                          {co.code}
+                        </div>
+                        {poColumns.map((po) => {
+                          const lvl = levelLookup.get(`${co.id}:${po.code}`) ?? 0;
+                          const bg = ['#F4F3EF', '#DCEBE6', '#9CC7BB', '#0E5E52'][lvl] ?? '#F4F3EF';
+                          const fg = lvl === 3 ? '#FFFFFF' : '#141413';
+                          return (
+                            <button
+                              key={`${co.id}-${po.code}`}
+                              type="button"
+                              disabled={locked}
+                              aria-label={`${co.code} ${po.code} level ${lvl}`}
+                              title={po.statement ? `${po.code}: ${po.statement}` : undefined}
+                              onClick={() => void cyclePoLevel(co.id, po.code)}
+                              className="mono"
+                              style={{
+                                minHeight: 28,
+                                border: '1px solid var(--border-soft)',
+                                borderRadius: 4,
+                                background: bg,
+                                color: fg,
+                                cursor: locked ? 'default' : 'pointer',
+                              }}
+                            >
+                              {lvl === 0 ? '·' : lvl}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)' }}>
                   Strength 0–3. Click a cell to cycle level.
