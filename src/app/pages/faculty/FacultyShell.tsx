@@ -6,6 +6,8 @@ import { todayIso } from '../../../lib/format';
 import { parseAskCommand, type FacultyStepId } from '../../../lib/logic/ask';
 import { computeNextBestActions } from '../../../lib/logic/nextBestActions';
 import { usagePct } from '../../../lib/logic/credits';
+import { useSession } from '../../../lib/session';
+import { RolePortalToggle } from '../../components/RolePortalToggle';
 import type { AiUsageSummary, Batch, Course, SessionRow } from '../../../lib/types';
 
 interface StepDef {
@@ -96,6 +98,7 @@ export function FacultyShell({
   children: ReactNode;
 }) {
   const navigate = useNavigate();
+  const { profile } = useSession();
   const [cmd, setCmd] = useState('');
   const [askReply, setAskReply] = useState<string | null>(null);
 
@@ -461,6 +464,7 @@ export function FacultyShell({
             </div>
           </div>
 
+          {profile?.role === 'hod' ? <RolePortalToggle active="faculty" /> : null}
           <NotificationBell variant="light" />
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>{facultyName}</div>
         </header>

@@ -4,6 +4,7 @@ import { supabase } from '../../../lib/supabase';
 import { errorMessage } from '../../../lib/errors';
 import { useSession } from '../../../lib/session';
 import { ConsoleShell, type NavItem } from '../../components/ConsoleShell';
+import { RolePortalToggle } from '../../components/RolePortalToggle';
 
 // ── types ──────────────────────────────────────────────────────────────────
 
@@ -561,6 +562,7 @@ export default function HodConsole() {
       activeTab={tab}
       onTabChange={(k) => setTab(k as typeof tab)}
       userEmail={profile?.email ?? ''}
+      topbarExtra={<RolePortalToggle active="hod" />}
       onSignOut={signOut}
     >
       {loading && <div style={{ padding: 24, color: 'var(--muted)' }}>Loading…</div>}

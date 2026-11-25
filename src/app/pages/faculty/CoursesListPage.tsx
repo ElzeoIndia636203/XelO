@@ -17,6 +17,7 @@ import { errorMessage } from '../../../lib/errors';
 import { useLoad } from '../../../lib/hooks';
 import { useSession } from '../../../lib/session';
 import { fetchAll, rpc, supabase } from '../../../lib/supabase';
+import { RolePortalToggle } from '../../components/RolePortalToggle';
 import type { Course, Department, School } from '../../../lib/types';
 
 const CLASS_YEARS = ['I Yr', 'II Yr', 'III Yr', 'IV Yr', 'V Yr'] as const;
@@ -187,11 +188,7 @@ export function CoursesListPage() {
           <Elzeo dark />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 13 }}>
-          {profile?.role === 'hod' ? (
-            <Link to="/hod" style={{ color: '#CFCDC5', textDecoration: 'underline' }}>
-              HOD console
-            </Link>
-          ) : null}
+          {profile?.role === 'hod' ? <RolePortalToggle active="faculty" dark /> : null}
           <span className="mono" style={{ color: '#CFCDC5' }}>
             {profile?.email}
           </span>
