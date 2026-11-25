@@ -192,7 +192,9 @@ export function AdminConsole() {
             />
           ) : null}
 
-          {tab === 'audit' ? <AuditTab rows={data.audit} /> : null}
+          {tab === 'audit' ? (
+            <AuditTab rows={data.audit} institutions={data.institutions} />
+          ) : null}
         </>
       ) : null}
     </ConsoleShell>

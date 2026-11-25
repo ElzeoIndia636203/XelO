@@ -108,6 +108,8 @@ export interface AuditFeedRow {
   actor_name: string;
   actor_role: UserRole | null;
   actor_email: string | null;
+  institution_id?: string | null;
+  institution_name?: string | null;
   detail: Record<string, unknown>;
 }
 
