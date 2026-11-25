@@ -3,6 +3,7 @@ import {
   validateAnnouncementDraft,
   validateBankDraft,
   validateClassTaskDraft,
+  validateFeedbackLoopDraft,
   validateLabCandidatesDraft,
   validateOutcomesDraft,
   validateReportNarrativeDraft,
@@ -53,6 +54,12 @@ const BodySchema = z.discriminatedUnion('kind', [
     course_id: z.string().uuid(),
     assessment_id: z.string().uuid(),
   }),
+  z.object({
+    kind: z.literal('feedback_loop'),
+    course_id: z.string().uuid(),
+    co_code: z.string().min(1).max(20),
+    co_statement: z.string().max(1000).optional(),
+  }),
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -81,11 +88,32 @@ Deno.serve(async (req: Request) => {
   const admin = adminClient();
   const { data: course } = await admin
     .from('courses')
-    .select('id, code, title, faculty_id, institution_id, allowed_langs')
+    .select('id, code, title, faculty_id, institution_id, department_id, allowed_langs')
     .eq('id', parsed.data.course_id)
     .single();
 
-  if (!course || course.faculty_id !== authData.user.id) {
+  if (!course) {
+    return json({ error: 'forbidden' }, 403, origin);
+  }
+
+  let authorized = course.faculty_id === authData.user.id;
+  if (!authorized && parsed.data.kind === 'feedback_loop') {
+    const { data: callerProf } = await admin
+      .from('profiles')
+      .select('role, roles, institution_id, department_id, active')
+      .eq('id', authData.user.id)
+      .single();
+    if (callerProf && callerProf.active) {
+      const rolesList = Array.isArray(callerProf.roles) ? callerProf.roles : [callerProf.role];
+      authorized =
+        rolesList.includes('super_admin') ||
+        (rolesList.includes('hod') &&
+          callerProf.institution_id === course.institution_id &&
+          callerProf.department_id === course.department_id);
+    }
+  }
+
+  if (!authorized) {
     return json({ error: 'forbidden' }, 403, origin);
   }
 
@@ -202,6 +230,28 @@ Deno.serve(async (req: Request) => {
     const { data: coRow } = session.co_id
       ? await admin.from('course_outcomes').select('code, statement').eq('id', session.co_id).single()
       : { data: null };
+
+    if (parsed.data.kind === 'feedback_loop') {
+      const questions = await callLlmJson(
+        {
+          system:
+            'You are XeIO Assist. Return ONLY valid JSON {"questions":[{"id":"q_1","category":"engagement","prompt":"..."}]}. Draft exactly 15 concise 5-to-1 rating-scale statements (5=Excellent/Strongly Agree, 1=Needs Improvement/Strongly Disagree): first 5 with category="engagement" (classroom/lab engagement & participation), next 5 with category="support" (faculty support, resource sharing, and doubt clarification), and final 5 with category="co_specific" tailored to the specific Course Outcome.',
+          user: `Course: ${course.code} ${course.title}\nCourse Outcome: ${parsed.data.co_code} — ${parsed.data.co_statement ?? ''}`,
+        },
+        validateFeedbackLoopDraft,
+      );
+
+      await admin.from('ai_runs').update({ status: 'completed' }).eq('id', runId);
+      await admin.rpc('audit', {
+        p_action: 'ai_generate_feedback_loop',
+        p_object_type: 'course',
+        p_object_id: course.id,
+        p_detail: { run_id: runId, co_code: parsed.data.co_code },
+        p_institution_id: course.institution_id,
+        p_actor_id: authData.user.id,
+      });
+      return json({ questions, run_id: runId }, 200, origin);
+    }
 
     if (parsed.data.kind === 'lab_candidates') {
       const { data: existingQs } = await admin

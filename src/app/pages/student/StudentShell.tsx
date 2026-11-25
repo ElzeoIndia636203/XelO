@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { FeedbackGateModal } from '../../components/FeedbackGateModal';
 import { NotificationBell } from '../../../components/NotificationBell';
 import { Elzeo, Wordmark } from '../../../components/ui';
 import { useSession } from '../../../lib/session';
@@ -105,6 +106,7 @@ export function StudentShell({
       <main style={{ flex: 1, width: '100%', maxWidth: 1240, margin: '0 auto', padding: '24px 20px' }}>
         {children}
       </main>
+      <FeedbackGateModal />
 
       <footer
         className="no-print"

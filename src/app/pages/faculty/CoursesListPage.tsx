@@ -17,6 +17,7 @@ import { errorMessage } from '../../../lib/errors';
 import { useLoad } from '../../../lib/hooks';
 import { useSession } from '../../../lib/session';
 import { fetchAll, rpc, supabase } from '../../../lib/supabase';
+import { FeedbackInsightsCard } from '../../components/FeedbackInsightsCard';
 import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
 import { RolePortalToggle } from '../../components/RolePortalToggle';
 import type { Course, Department, School } from '../../../lib/types';
@@ -281,6 +282,7 @@ export function CoursesListPage() {
           </div>
         ) : null}
 
+        <FeedbackInsightsCard />
         <HierarchyMeetingsCard
           title="Notifications & meetings (Students / HOD / Dean)"
           allowNotify

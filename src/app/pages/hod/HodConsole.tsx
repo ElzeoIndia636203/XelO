@@ -6,6 +6,7 @@ import { useSession } from '../../../lib/session';
 import { ConsoleShell, type NavItem } from '../../components/ConsoleShell';
 import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
 import { RolePortalToggle } from '../../components/RolePortalToggle';
+import { FeedbackLoopTab } from './FeedbackLoopTab';
 
 // ── types ──────────────────────────────────────────────────────────────────
 
@@ -334,7 +335,7 @@ export default function HodConsole() {
   const { profile, signOut } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = searchParams.get('tab');
-  const validTabs = ['overview', 'approvals', 'courses', 'faculties', 'outcomes', 'calendar', 'live', 'final'] as const;
+  const validTabs = ['overview', 'approvals', 'courses', 'faculties', 'outcomes', 'calendar', 'feedback', 'live', 'final'] as const;
   const tab: (typeof validTabs)[number] =
     validTabs.includes(initialTab as (typeof validTabs)[number])
       ? (initialTab as (typeof validTabs)[number])
@@ -1034,6 +1035,7 @@ export default function HodConsole() {
     { id: 'faculties', label: 'Faculties' },
     { id: 'outcomes',  label: 'POs & PSOs' },
     { id: 'calendar',  label: 'Academic calendar' },
+    { id: 'feedback',  label: 'Feedback loop' },
     { id: 'live',      label: 'Live', badge: liveCount > 0 ? liveCount : undefined },
     { id: 'final',     label: 'Final marks' },
   ];
@@ -2190,6 +2192,9 @@ export default function HodConsole() {
           </div>
         </div>
       )}
+
+      {/* ── Feedback loop ── */}
+      {tab === 'feedback' && <FeedbackLoopTab departmentId={profile?.department_id ?? null} />}
 
       {/* ── Final marks ── */}
       {tab === 'final' && (

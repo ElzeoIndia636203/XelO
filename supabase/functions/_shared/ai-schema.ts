@@ -405,3 +405,38 @@ export function validateReportNarrativeDraft(raw: unknown): ReportNarrativeDraft
   }
   return { internal_summary, overall_summary, bos_suggestions };
 }
+
+export interface FeedbackQuestionDraft {
+  id: string;
+  category: 'engagement' | 'support' | 'co_specific';
+  prompt: string;
+}
+
+export function validateFeedbackLoopDraft(raw: unknown): FeedbackQuestionDraft[] {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('invalid_ai_shape');
+  }
+  const obj = raw as Record<string, unknown>;
+  if (!Array.isArray(obj.questions) || obj.questions.length < 15) {
+    throw new Error('invalid_ai_shape');
+  }
+  const out: FeedbackQuestionDraft[] = [];
+  for (const [i, item] of obj.questions.slice(0, 15).entries()) {
+    if (!item || typeof item !== 'object') throw new Error('invalid_ai_shape');
+    const row = item as Record<string, unknown>;
+    const cat = row.category;
+    const prompt = typeof row.prompt === 'string' ? row.prompt.trim() : '';
+    if (
+      (cat !== 'engagement' && cat !== 'support' && cat !== 'co_specific') ||
+      prompt.length < 8
+    ) {
+      throw new Error('invalid_ai_shape');
+    }
+    out.push({
+      id: typeof row.id === 'string' && row.id.trim() ? row.id.trim() : `q_${i + 1}`,
+      category: cat,
+      prompt,
+    });
+  }
+  return out;
+}
