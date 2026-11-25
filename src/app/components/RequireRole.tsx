@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { Loading } from '../../components/ui';
-import { homeForRole, type UserRole } from '../../lib/logic/routing';
+import { effectiveRoles, homeForRole, type UserRole } from '../../lib/logic/routing';
 import { useSession } from '../../lib/session';
 
 export function RequireRole({
@@ -27,7 +27,8 @@ export function RequireRole({
     return <Navigate to="/login" state={{ from }} replace />;
   }
 
-  if (!allow.includes(profile.role)) {
+  const assigned = effectiveRoles(profile.role, profile.roles);
+  if (!assigned.some((r) => allow.includes(r))) {
     return <Navigate to={homeForRole(profile.role)} replace />;
   }
 

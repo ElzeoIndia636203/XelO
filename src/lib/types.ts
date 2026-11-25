@@ -42,6 +42,7 @@ export interface Profile {
   email: string;
   full_name: string;
   role: UserRole;
+  roles?: UserRole[];
   school_id: string | null;
   department_id: string | null;
   roll_no: string | null;

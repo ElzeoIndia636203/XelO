@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { errorMessage } from '../../../lib/errors';
 import { useSession } from '../../../lib/session';
+import { RolePortalToggle } from '../../components/RolePortalToggle';
 
 // ── types ──────────────────────────────────────────────────────────────────
 
@@ -347,6 +348,7 @@ export default function OversightConsole() {
             </button>
           ))}
         </nav>
+        <RolePortalToggle active="oversight" dark />
         <button
           onClick={signOut}
           style={{

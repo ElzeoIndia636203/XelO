@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Card, Chip, Empty } from '../../../components/ui';
+import { Card, Chip, Empty, Modal } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { emailDomain } from '../../../lib/logic/domain';
 import type { UserRole } from '../../../lib/logic/routing';
@@ -64,6 +64,11 @@ export function UsersTab({
   const [role, setRole] = useState<UserRole>('hod');
   const [schoolId, setSchoolId] = useState('');
   const [deptId, setDeptId] = useState('');
+  const [editingUser, setEditingUser] = useState<Profile | null>(null);
+  const [editRoles, setEditRoles] = useState<UserRole[]>([]);
+  const [editInstId, setEditInstId] = useState('');
+  const [editSchoolId, setEditSchoolId] = useState('');
+  const [editDeptId, setEditDeptId] = useState('');
   const [busy, setBusy] = useState(false);
 
   const activeInstId = instId || institutions[0]?.id || '';
@@ -155,6 +160,46 @@ export function UsersTab({
     try {
       await rpc('admin_remove_user', { p_user_id: prof.id, p_invite_id: null });
       onNotify(`${prof.email} removed.`, true);
+      await onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openRoleEditor(u: Profile) {
+    const current = u.roles && u.roles.length > 0 ? u.roles : [u.role];
+    setEditingUser(u);
+    setEditRoles(current);
+    setEditInstId(u.institution_id ?? institutions[0]?.id ?? '');
+    setEditSchoolId(u.school_id ?? '');
+    setEditDeptId(u.department_id ?? '');
+  }
+
+  function toggleEditRole(r: UserRole) {
+    setEditRoles((prev) =>
+      prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r],
+    );
+  }
+
+  async function saveUserRoles(e: FormEvent) {
+    e.preventDefault();
+    if (!editingUser || editRoles.length === 0) {
+      onNotify('Select at least one role.', false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await rpc('admin_assign_roles', {
+        p_user_id: editingUser.id,
+        p_roles: editRoles,
+        p_institution_id: editInstId || null,
+        p_school_id: editSchoolId || null,
+        p_department_id: editDeptId || null,
+      });
+      onNotify(`Updated roles for ${editingUser.email}.`, true);
+      setEditingUser(null);
       await onRefresh();
     } catch (err) {
       onNotify(errorMessage(err), false);
@@ -324,7 +369,11 @@ export function UsersTab({
                     <td className="mono" style={{ fontSize: 12 }}>
                       {u.email}
                     </td>
-                    <td>{ROLE_LABELS[u.role]}</td>
+                    <td>
+                      {(u.roles && u.roles.length > 0 ? u.roles : [u.role])
+                        .map((r) => ROLE_LABELS[r])
+                        .join(', ')}
+                    </td>
                     <td style={{ fontSize: 12, color: 'var(--muted)' }}>
                       {scopeText(u.role, u.institution_id, u.school_id, u.department_id)}
                     </td>
@@ -338,6 +387,14 @@ export function UsersTab({
                         <span style={{ fontSize: 12, color: 'var(--faint)' }}>Protected</span>
                       ) : (
                         <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            disabled={busy}
+                            onClick={() => openRoleEditor(u)}
+                          >
+                            Roles
+                          </button>
                           <button
                             type="button"
                             className="btn field-sm"
@@ -399,6 +456,102 @@ export function UsersTab({
         <span className="mono">{studentCount}</span> students onboarded by{' '}
         <span className="mono">{activeFacultyCount}</span> faculty.
       </div>
+
+      <Modal
+        open={Boolean(editingUser)}
+        title={editingUser ? `Assign roles · ${editingUser.full_name}` : 'Assign roles'}
+        onClose={() => setEditingUser(null)}
+      >
+        {editingUser ? (
+          <form onSubmit={saveUserRoles} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="mono" style={{ fontSize: 12, color: 'var(--muted)' }}>
+              {editingUser.email}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+              {([...STAFF_ROLES, { value: 'super_admin' as UserRole, label: 'Super admin' }]).map((opt) => (
+                <label key={opt.value} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={editRoles.includes(opt.value)}
+                    onChange={() => toggleEditRole(opt.value)}
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+            <div className="grid-2">
+              <label className="field-label">
+                Institution
+                <select
+                  className="field"
+                  value={editInstId}
+                  onChange={(e) => {
+                    setEditInstId(e.target.value);
+                    setEditSchoolId('');
+                    setEditDeptId('');
+                  }}
+                >
+                  <option value="">All / none</option>
+                  {institutions.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field-label">
+                School
+                <select
+                  className="field"
+                  value={editSchoolId}
+                  onChange={(e) => {
+                    setEditSchoolId(e.target.value);
+                    setEditDeptId('');
+                  }}
+                >
+                  <option value="">None</option>
+                  {schools
+                    .filter((s) => !editInstId || s.institution_id === editInstId)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+            <label className="field-label">
+              Department
+              <select
+                className="field"
+                value={editDeptId}
+                onChange={(e) => setEditDeptId(e.target.value)}
+              >
+                <option value="">None</option>
+                {departments
+                  .filter(
+                    (d) =>
+                      (!editInstId || d.institution_id === editInstId) &&
+                      (!editSchoolId || d.school_id === editSchoolId),
+                  )
+                  .map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.code} · {d.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+              <button type="button" className="btn" onClick={() => setEditingUser(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={busy || editRoles.length === 0}>
+                {busy ? 'Saving…' : 'Save roles'}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </Modal>
     </div>
   );
 }

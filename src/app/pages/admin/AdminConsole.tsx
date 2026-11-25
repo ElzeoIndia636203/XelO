@@ -16,6 +16,7 @@ import type {
   SubscriptionRequest,
 } from '../../../lib/types';
 import { ConsoleShell, type NavItem } from '../../components/ConsoleShell';
+import { RolePortalToggle } from '../../components/RolePortalToggle';
 import { AuditTab } from './AuditTab';
 import { CreditsTab } from './CreditsTab';
 import { InstitutionsTab } from './InstitutionsTab';
@@ -143,6 +144,7 @@ export function AdminConsole() {
       activeTab={tab}
       onTabChange={selectTab}
       userEmail={profile?.email ?? ''}
+      topbarExtra={<RolePortalToggle active="admin" />}
       onSignOut={() => void signOut()}
     >
       <PageHead title={meta.title} lead={meta.lead} />

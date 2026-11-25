@@ -31,6 +31,17 @@ export function homeForRole(role: UserRole): string {
   return ROLE_HOMES[role];
 }
 
+export function effectiveRoles(
+  primaryRole: UserRole,
+  roles?: readonly UserRole[] | null,
+): UserRole[] {
+  const base = roles && roles.length > 0 ? [...roles] : [primaryRole];
+  if (base.includes('hod') && !base.includes('faculty')) {
+    base.push('faculty');
+  }
+  return Array.from(new Set(base));
+}
+
 export function canAccessRoute(role: UserRole, path: string): boolean {
   const clean = path.split('?')[0]?.split('#')[0] ?? '/';
   const prefixes = ROLE_PREFIXES[role];
