@@ -48,7 +48,7 @@ export function SubscriptionsTab({
   const [reqPlan, setReqPlan] = useState<PlanTier>('pro');
   const [reqStart, setReqStart] = useState(todayIso());
   const [reqMonths, setReqMonths] = useState<3 | 6 | 12>(6);
-  const [reqScope, setReqScope] = useState('');
+  const [reqCount, setReqCount] = useState<number>(1);
   const [edits, setEdits] = useState<
     Record<string, { plan: PlanTier; start: string; months: 3 | 6 | 12 }>
   >({});
@@ -85,14 +85,15 @@ export function SubscriptionsTab({
     if (!targetInst) return;
     setBusy(true);
     try {
+      const count = Math.max(1, Math.floor(reqCount) || 1);
       await rpc('admin_create_subscription_request', {
         p_institution_id: targetInst,
         p_plan: reqPlan,
         p_start_date: reqStart,
         p_months: reqMonths,
-        p_scope_label: reqScope.trim() || instMap.get(targetInst)?.name || '',
+        p_scope_label: `${count} ${count === 1 ? 'subscription' : 'subscriptions'}`,
       });
-      setReqScope('');
+      setReqCount(1);
       onNotify('Subscription request recorded.', true);
       await onRefresh();
     } catch (err) {
@@ -262,13 +263,14 @@ export function SubscriptionsTab({
             </select>
           </label>
           <label className="field-label">
-            For (university)
+            Subscriptions
             <input
-              className="field"
-              value={reqScope}
-              onChange={(e) => setReqScope(e.target.value)}
-              placeholder="University name (e.g. Sanjivani University)"
-              style={{ width: 240 }}
+              className="field mono"
+              type="number"
+              min={1}
+              value={reqCount}
+              onChange={(e) => setReqCount(Math.max(1, Number(e.target.value) || 1))}
+              style={{ width: 120 }}
             />
           </label>
           <button type="submit" className="btn btn-primary" disabled={busy || institutions.length === 0}>
