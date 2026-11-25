@@ -1,3 +1,5 @@
+export type SaturdayRule = 'all' | 'odd' | 'even' | 'none';
+
 export interface PlanDatesInput {
   start: string;
   end: string;
@@ -5,6 +7,7 @@ export interface PlanDatesInput {
   holidays: ReadonlyArray<{ day: string; label?: string }>;
   sessions: number;
   reserveLast: boolean;
+  saturdayRule?: SaturdayRule;
 }
 
 export interface PlannedPeriod {
@@ -50,13 +53,25 @@ export function planDates(input: PlanDatesInput): PlanDatesResult {
 
   const weekdaySet = new Set(input.weekdays);
   const holidayMap = new Map(input.holidays.map((h) => [h.day, h.label?.trim() || 'Holiday']));
+  const satRule = input.saturdayRule ?? 'none';
 
   const slots: Array<{ date: string; blockedLabel: string | null }> = [];
   const cur = new Date(startDate.getTime());
   while (cur <= endDate) {
     if (weekdaySet.has(cur.getUTCDay())) {
       const iso = toIsoDate(cur);
-      slots.push({ date: iso, blockedLabel: holidayMap.get(iso) ?? null });
+      let blockedLabel = holidayMap.get(iso) ?? null;
+      if (!blockedLabel && cur.getUTCDay() === 6 && satRule !== 'none') {
+        const satOccurrence = Math.ceil(cur.getUTCDate() / 7);
+        if (satRule === 'all') {
+          blockedLabel = 'Saturday holiday';
+        } else if (satRule === 'odd' && satOccurrence % 2 === 1) {
+          blockedLabel = 'Odd Saturday holiday';
+        } else if (satRule === 'even' && satOccurrence % 2 === 0) {
+          blockedLabel = 'Even Saturday holiday';
+        }
+      }
+      slots.push({ date: iso, blockedLabel });
     }
     cur.setUTCDate(cur.getUTCDate() + 1);
   }

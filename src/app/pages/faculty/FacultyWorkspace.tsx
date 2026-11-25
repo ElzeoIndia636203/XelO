@@ -122,7 +122,7 @@ export function FacultyWorkspace() {
     const qIds = (questionsList ?? []).map((q) => q.id);
     const sIds = (sessions ?? []).map((s) => s.id);
 
-    const [testCases, references, sessionQuestions, bankItems, sessionRuns] = await Promise.all([
+    const [testCases, references, sessionQuestions, bankItems, sessionRuns, deptCalRes] = await Promise.all([
       qIds.length > 0
         ? fetchAll<TestCaseRow>((from, to) =>
             supabase.from('test_cases').select('*').in('question_id', qIds).order('ord').range(from, to),
@@ -148,7 +148,41 @@ export function FacultyWorkspace() {
             supabase.from('session_runs').select('*').in('session_id', sIds).range(from, to),
           )
         : Promise.resolve<SessionRunRow[]>([]),
+      courseRes.data.department_id
+        ? supabase
+            .from('academic_calendars')
+            .select('id, first_working_day, last_working_day, expected_endsem_date, saturday_rule, approved')
+            .eq('department_id', courseRes.data.department_id)
+            .eq('approved', true)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
+
+    let departmentCalendar: {
+      first_working_day: string;
+      last_working_day: string;
+      expected_endsem_date: string | null;
+      saturday_rule: 'all' | 'odd' | 'even' | 'none';
+      events: Array<{ day: string; kind: string; label: string }>;
+    } | null = null;
+    if (!deptCalRes.error && deptCalRes.data) {
+      const cal = deptCalRes.data as {
+        id: string;
+        first_working_day: string;
+        last_working_day: string;
+        expected_endsem_date: string | null;
+        saturday_rule: 'all' | 'odd' | 'even' | 'none';
+      };
+      const { data: evRows } = await supabase
+        .from('academic_calendar_events')
+        .select('day, kind, label')
+        .eq('calendar_id', cal.id)
+        .order('day');
+      departmentCalendar = {
+        ...cal,
+        events: ((evRows ?? []) as Array<{ day: string; kind: string; label: string }>),
+      };
+    }
 
     return {
       course: courseRes.data,
@@ -167,6 +201,7 @@ export function FacultyWorkspace() {
       sessionQuestions,
       bankItems,
       sessionRuns,
+      departmentCalendar,
     };
   }, [courseId]);
 
@@ -287,6 +322,7 @@ export function FacultyWorkspace() {
           outcomes={data.outcomes}
           sessions={data.sessions}
           institutionHolidays={data.holidays}
+          departmentCalendar={data.departmentCalendar}
           onNotify={(text, ok) => setNotice({ text, ok })}
           onRefresh={reload}
         />

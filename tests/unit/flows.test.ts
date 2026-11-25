@@ -45,6 +45,31 @@ describe('session plan date scheduling and topic merging', () => {
     expect(enough.sessionDates).toHaveLength(30);
   });
 
+  it('blocks odd, even, or all Saturdays according to saturdayRule', () => {
+    // Jan 2027 Saturdays: Jan 2 (1st/odd), Jan 9 (2nd/even), Jan 16 (3rd/odd), Jan 23 (4th/even)
+    const oddBlocked = planDates({
+      start: '2027-01-01',
+      end: '2027-01-25',
+      weekdays: [6],
+      holidays: [],
+      sessions: 4,
+      reserveLast: false,
+      saturdayRule: 'odd',
+    });
+    expect(oddBlocked.sessionDates).toEqual(['2027-01-09', '2027-01-09', '2027-01-23', '2027-01-23']);
+
+    const evenBlocked = planDates({
+      start: '2027-01-01',
+      end: '2027-01-25',
+      weekdays: [6],
+      holidays: [],
+      sessions: 4,
+      reserveLast: false,
+      saturdayRule: 'even',
+    });
+    expect(evenBlocked.sessionDates).toEqual(['2027-01-02', '2027-01-02', '2027-01-16', '2027-01-16']);
+  });
+
   it('suggests merging shortest adjacent topic pair and applies merge', () => {
     const topics = ['Introduction to Input and Output', 'for loop', 'if else', 'Dynamic memory allocation'];
     const suggestion = suggestMerge(topics);

@@ -4,7 +4,7 @@ import { CalendarLinkCard } from '../../../components/CalendarLinkCard';
 import { Banner, Card, Chip } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { formatDateIst } from '../../../lib/format';
-import { applyMerge, planDates, suggestMerge } from '../../../lib/logic/flows';
+import { applyMerge, planDates, suggestMerge, type SaturdayRule } from '../../../lib/logic/flows';
 import { rpc } from '../../../lib/supabase';
 import type { Course, CourseOutcome, HolidayRow, SessionRow } from '../../../lib/types';
 
@@ -50,11 +50,27 @@ const DEFAULT_TOPICS = [
   'Mini project integration',
 ];
 
+export interface DepartmentCalendarInfo {
+  first_working_day: string;
+  last_working_day: string;
+  expected_endsem_date: string | null;
+  saturday_rule: SaturdayRule;
+  events: ReadonlyArray<{ day: string; kind: string; label: string }>;
+}
+
+const EVENT_KIND_PREFIX: Record<string, string> = {
+  internal_exam: 'Internal exam',
+  regional_holiday: 'Regional holiday',
+  other_holiday: 'Holiday',
+  leave: 'Leave',
+};
+
 export function SessionPlanStep({
   course,
   outcomes,
   sessions,
   institutionHolidays,
+  departmentCalendar,
   onNotify,
   onRefresh,
 }: {
@@ -62,13 +78,14 @@ export function SessionPlanStep({
   outcomes: readonly CourseOutcome[];
   sessions: readonly SessionRow[];
   institutionHolidays: readonly HolidayRow[];
+  departmentCalendar?: DepartmentCalendarInfo | null;
   onNotify: (msg: string, ok: boolean) => void;
   onRefresh: () => void;
 }) {
   const locked = sessions.some((s) => s.status === 'active' || s.status === 'conducted');
 
-  const [firstDay, setFirstDay] = useState('2027-01-06');
-  const [lastDay, setLastDay] = useState('2027-04-28');
+  const [firstDay, setFirstDay] = useState(departmentCalendar?.first_working_day ?? '2027-01-06');
+  const [lastDay, setLastDay] = useState(departmentCalendar?.last_working_day ?? '2027-04-28');
   const [weekdays, setWeekdays] = useState<number[]>([3]);
   const [reserveLast, setReserveLast] = useState(true);
   const [extraHolidays, setExtraHolidays] = useState<Array<{ day: string; label: string }>>([]);
@@ -81,6 +98,10 @@ export function SessionPlanStep({
 
   const allHolidays = [
     ...institutionHolidays.map((h) => ({ day: h.day, label: h.label })),
+    ...(departmentCalendar?.events ?? []).map((ev) => ({
+      day: ev.day,
+      label: `${EVENT_KIND_PREFIX[ev.kind] ?? 'Blocked'}: ${ev.label}`,
+    })),
     ...extraHolidays,
   ];
 
@@ -91,6 +112,7 @@ export function SessionPlanStep({
     holidays: allHolidays,
     sessions: topics.length,
     reserveLast,
+    saturdayRule: departmentCalendar?.saturday_rule ?? 'none',
   });
 
   const mergeSuggestion = plan.shortBy > 0 ? suggestMerge(topics) : null;
@@ -154,6 +176,17 @@ export function SessionPlanStep({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {departmentCalendar ? (
+        <Banner tone="ok">
+          HOD-approved academic calendar applied ({departmentCalendar.first_working_day} to{' '}
+          {departmentCalendar.last_working_day}
+          {departmentCalendar.expected_endsem_date
+            ? ` · Expected end-sem: ${departmentCalendar.expected_endsem_date}`
+            : ''}
+          {` · Saturday rule: ${departmentCalendar.saturday_rule}`}). No classes are mapped on holidays, leave, or exam days.
+        </Banner>
+      ) : null}
+
       <Card
         title="Calendar configuration"
         actions={
