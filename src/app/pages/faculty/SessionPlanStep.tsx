@@ -55,7 +55,13 @@ export interface DepartmentCalendarInfo {
   last_working_day: string;
   expected_endsem_date: string | null;
   saturday_rule: SaturdayRule;
-  events: ReadonlyArray<{ day: string; kind: string; label: string }>;
+  events: ReadonlyArray<{
+    day: string;
+    kind: string;
+    event_type?: string | null;
+    label: string;
+    no_attendance?: boolean;
+  }>;
 }
 
 const EVENT_KIND_PREFIX: Record<string, string> = {
@@ -63,6 +69,7 @@ const EVENT_KIND_PREFIX: Record<string, string> = {
   regional_holiday: 'Regional holiday',
   other_holiday: 'Holiday',
   leave: 'Leave',
+  academic_event: 'Academic event',
 };
 
 export function SessionPlanStep({
@@ -98,10 +105,12 @@ export function SessionPlanStep({
 
   const allHolidays = [
     ...institutionHolidays.map((h) => ({ day: h.day, label: h.label })),
-    ...(departmentCalendar?.events ?? []).map((ev) => ({
-      day: ev.day,
-      label: `${EVENT_KIND_PREFIX[ev.kind] ?? 'Blocked'}: ${ev.label}`,
-    })),
+    ...(departmentCalendar?.events ?? [])
+      .filter((ev) => ev.kind !== 'academic_event' || ev.no_attendance)
+      .map((ev) => ({
+        day: ev.day,
+        label: `${EVENT_KIND_PREFIX[ev.kind] ?? 'Blocked'}${ev.event_type ? ` (${ev.event_type})` : ''}: ${ev.label}`,
+      })),
     ...extraHolidays,
   ];
 
@@ -449,7 +458,14 @@ export function SessionPlanStep({
                     <td className="mono" style={{ fontSize: 12 }}>
                       {s.scheduled_date ? formatDateIst(s.scheduled_date) : '—'}
                     </td>
-                    <td>{s.topic}</td>
+                    <td>
+                      {s.topic}
+                      {s.hod_override_event ? (
+                        <div style={{ marginTop: 4 }}>
+                          <Chip tone="warn">{s.hod_override_event}</Chip>
+                        </div>
+                      ) : null}
+                    </td>
                     <td className="mono">L{s.btl}</td>
                     <td>
                       <Chip tone={s.status === 'active' || s.status === 'conducted' ? 'good' : 'neutral'}>

@@ -191,14 +191,21 @@ interface DeptOutcomeRow {
   statement: string;
 }
 
-type CalendarEventKind = 'internal_exam' | 'regional_holiday' | 'other_holiday' | 'leave';
+type CalendarEventKind =
+  | 'internal_exam'
+  | 'regional_holiday'
+  | 'other_holiday'
+  | 'leave'
+  | 'academic_event';
 type SaturdayRule = 'all' | 'odd' | 'even' | 'none';
 
 interface CalendarEventRow {
   id: string;
   day: string;
   kind: CalendarEventKind;
+  event_type?: string | null;
   label: string;
+  no_attendance?: boolean;
 }
 
 interface FacultyCourseStatRow {
@@ -221,7 +228,49 @@ const CAL_EVENT_LABELS: Record<CalendarEventKind, string> = {
   regional_holiday: 'Regional / local holiday',
   other_holiday: 'Other holiday',
   leave: 'Leave',
+  academic_event: 'Academic event (Hackathon / Symposium / Workshop...)',
 };
+
+const ACADEMIC_EVENT_PRESETS = [
+  'Hackathon',
+  'Symposium',
+  'Expo',
+  'Seminar',
+  'Workshop',
+  'Culturals',
+  'Other',
+] as const;
+
+function isSaturdayHolidayForRule(isoDate: string, rule: SaturdayRule): boolean {
+  const dt = new Date(`${isoDate}T00:00:00Z`);
+  if (dt.getUTCDay() !== 6) return false;
+  if (rule === 'all') return true;
+  if (rule === 'none') return false;
+  const nth = Math.ceil(dt.getUTCDate() / 7);
+  return rule === 'odd' ? nth % 2 === 1 : nth % 2 === 0;
+}
+
+function buildMonthGrid(ym: string): Array<string | null> {
+  const [yStr, mStr] = ym.split('-');
+  const y = Number(yStr);
+  const m = Number(mStr);
+  if (!y || !m) return [];
+  const firstDow = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(); // 0=Sun..6=Sat
+  const offset = (firstDow + 6) % 7; // Mon=0..Sun=6
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const cells: Array<string | null> = Array.from({ length: offset }, () => null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(`${yStr}-${mStr}-${String(d).padStart(2, '0')}`);
+  }
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+function shiftMonth(ym: string, delta: number): string {
+  const [yStr, mStr] = ym.split('-');
+  const dt = new Date(Date.UTC(Number(yStr), Number(mStr) - 1 + delta, 1));
+  return dt.toISOString().slice(0, 7);
+}
 
 const STANDARD_NBA_POS: ReadonlyArray<{ code: string; statement: string }> = [
   {
@@ -319,7 +368,11 @@ export default function HodConsole() {
   const [calEvDay, setCalEvDay] = useState('');
   const [calEvEndDay, setCalEvEndDay] = useState('');
   const [calEvKind, setCalEvKind] = useState<CalendarEventKind>('internal_exam');
+  const [calEvTypePreset, setCalEvTypePreset] = useState<string>('Hackathon');
+  const [calEvCustomType, setCalEvCustomType] = useState('');
+  const [calEvNoAttendance, setCalEvNoAttendance] = useState(false);
   const [calEvLabel, setCalEvLabel] = useState('');
+  const [calMonth, setCalMonth] = useState('2027-01');
   const [editingEvId, setEditingEvId] = useState<string | null>(null);
   const [editEvDay, setEditEvDay] = useState('');
   const [editEvKind, setEditEvKind] = useState<CalendarEventKind>('internal_exam');
@@ -387,9 +440,10 @@ export default function HodConsole() {
       setCalEndsemDate(typedCal.expected_endsem_date ?? '');
       setCalSatRule(typedCal.saturday_rule);
       setCalApproved(typedCal.approved);
+      setCalMonth(typedCal.first_working_day.slice(0, 7));
       const { data: evRows } = await supabase
         .from('academic_calendar_events')
-        .select('id, day, kind, label')
+        .select('id, day, kind, event_type, label, no_attendance')
         .eq('calendar_id', typedCal.id)
         .order('day');
       setCalEvents(((evRows ?? []) as CalendarEventRow[]));
@@ -733,10 +787,19 @@ export default function HodConsole() {
     void loadAll();
   }
 
+  function resolvedEventType(): string | null {
+    if (calEvKind !== 'academic_event') return null;
+    if (calEvTypePreset === 'Other') {
+      return calEvCustomType.trim() || 'Academic Event';
+    }
+    return calEvTypePreset;
+  }
+
   function addCalendarEvent(e: React.FormEvent) {
     e.preventDefault();
-    if (!calEvDay || !calEvLabel.trim()) {
-      setErr('Enter a From date and description for the holiday/exam day.');
+    const evType = resolvedEventType();
+    if (!calEvDay || (!calEvLabel.trim() && !evType)) {
+      setErr('Enter a From date and description for the event/holiday.');
       return;
     }
     const endIso = calEvEndDay || calEvDay;
@@ -754,6 +817,7 @@ export default function HodConsole() {
       cur.setUTCDate(cur.getUTCDate() + 1);
     }
 
+    const labelText = calEvLabel.trim() || evType || 'Event';
     const existingDays = new Set(calEvents.map((ev) => ev.day));
     const additions: CalendarEventRow[] = days
       .filter((d) => !existingDays.has(d))
@@ -761,7 +825,9 @@ export default function HodConsole() {
         id: `draft-${Date.now()}-${d}`,
         day: d,
         kind: calEvKind,
-        label: calEvLabel.trim(),
+        event_type: evType,
+        label: labelText,
+        no_attendance: calEvNoAttendance || calEvKind !== 'academic_event',
       }));
 
     if (additions.length === 0) {
@@ -774,6 +840,53 @@ export default function HodConsole() {
     setCalEvDay('');
     setCalEvEndDay('');
     setCalEvLabel('');
+    setCalEvNoAttendance(false);
+  }
+
+  async function declareEventLive() {
+    const evType = resolvedEventType();
+    if (!calEvDay || (!calEvLabel.trim() && !evType)) {
+      setErr('Enter a From date and event name/description.');
+      return;
+    }
+    const endIso = calEvEndDay || calEvDay;
+    if (endIso < calEvDay) {
+      setErr('To date must be on or after From date.');
+      return;
+    }
+    setCalBusy(true);
+    setErr('');
+    setNotice('');
+    const { data, error } = await supabase.rpc('hod_declare_calendar_event', {
+      p_from_day: calEvDay,
+      p_to_day: endIso,
+      p_kind: calEvKind,
+      p_event_type: evType,
+      p_label: calEvLabel.trim() || evType || 'Event',
+      p_no_attendance: calEvNoAttendance,
+    });
+    setCalBusy(false);
+    if (error) {
+      setErr(errorMessage(error.message));
+      return;
+    }
+    const res = (data ?? {}) as {
+      days_saved?: number;
+      sessions_overridden?: number;
+      notified_users?: number;
+      override_text?: string | null;
+    };
+    setCalMonth(calEvDay.slice(0, 7));
+    setCalEvDay('');
+    setCalEvEndDay('');
+    setCalEvLabel('');
+    setCalEvNoAttendance(false);
+    setNotice(
+      res.override_text
+        ? `Declared ${res.days_saved ?? 1} No-attendance day(s): ${res.override_text}. ${res.sessions_overridden ?? 0} scheduled session(s) overridden and ${res.notified_users ?? 0} notifications sent to class, faculty, students, Dean, CoE, and VC.`
+        : `Added event for ${res.days_saved ?? 1} day(s) on the academic calendar.`,
+    );
+    void loadDeptConfig();
   }
 
   function startEditCalEvent(ev: CalendarEventRow) {
@@ -865,7 +978,9 @@ export default function HodConsole() {
         department_id: profile.department_id,
         day: ev.day,
         kind: ev.kind,
+        event_type: ev.event_type ?? null,
         label: ev.label.trim(),
+        no_attendance: Boolean(ev.no_attendance),
       }));
       const { error: insEvErr } = await supabase
         .from('academic_calendar_events')
@@ -1794,7 +1909,24 @@ export default function HodConsole() {
                     ) : (
                       <tr key={ev.id} style={{ borderBottom: '1px solid var(--border)' }}>
                         <td style={{ padding: '10px 12px', fontFamily: 'var(--mono)' }}>{ev.day}</td>
-                        <td style={{ padding: '10px 12px', fontSize: '0.82rem' }}>{CAL_EVENT_LABELS[ev.kind]}</td>
+                        <td style={{ padding: '10px 12px', fontSize: '0.82rem' }}>
+                          {ev.event_type ? `${ev.event_type}` : CAL_EVENT_LABELS[ev.kind]}
+                          {ev.no_attendance ? (
+                            <span
+                              className="mono"
+                              style={{
+                                marginLeft: 8,
+                                fontSize: '0.7rem',
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                background: '#FCE8D5',
+                                color: '#9A3412',
+                              }}
+                            >
+                              No-attendance
+                            </span>
+                          ) : null}
+                        </td>
                         <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{ev.label}</td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                           <div style={{ display: 'inline-flex', gap: 6 }}>
@@ -1817,62 +1949,218 @@ export default function HodConsole() {
               onSubmit={addCalendarEvent}
               style={{
                 display: 'flex',
-                flexWrap: 'wrap',
-                gap: 10,
-                alignItems: 'flex-end',
+                flexDirection: 'column',
+                gap: 12,
                 padding: 16,
                 border: '1px solid var(--border)',
                 borderRadius: 8,
                 background: 'var(--surface)',
               }}
             >
-              <label className="field-label">
-                From
-                <input
-                  className="field mono"
-                  type="date"
-                  value={calEvDay}
-                  onChange={(e) => setCalEvDay(e.target.value)}
-                />
-              </label>
-              <label className="field-label">
-                To (optional)
-                <input
-                  className="field mono"
-                  type="date"
-                  min={calEvDay || undefined}
-                  value={calEvEndDay}
-                  onChange={(e) => setCalEvEndDay(e.target.value)}
-                />
-              </label>
-              <label className="field-label">
-                Category
-                <select
-                  className="field"
-                  value={calEvKind}
-                  onChange={(e) => setCalEvKind(e.target.value as CalendarEventKind)}
-                >
-                  {Object.entries(CAL_EVENT_LABELS).map(([k, lbl]) => (
-                    <option key={k} value={k}>
-                      {lbl}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field-label" style={{ flex: '1 1 240px' }}>
-                Description
-                <input
-                  className="field"
-                  value={calEvLabel}
-                  onChange={(e) => setCalEvLabel(e.target.value)}
-                  placeholder="Mid-sem internal exam / Gudi Padwa / Regional holiday"
-                />
-              </label>
-              <button type="submit" className="btn btn-primary" disabled={calBusy}>
-                Add date
-              </button>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+                <label className="field-label">
+                  From
+                  <input
+                    className="field mono"
+                    type="date"
+                    value={calEvDay}
+                    onChange={(e) => setCalEvDay(e.target.value)}
+                  />
+                </label>
+                <label className="field-label">
+                  To (optional)
+                  <input
+                    className="field mono"
+                    type="date"
+                    min={calEvDay || undefined}
+                    value={calEvEndDay}
+                    onChange={(e) => setCalEvEndDay(e.target.value)}
+                  />
+                </label>
+                <label className="field-label">
+                  Category
+                  <select
+                    className="field"
+                    value={calEvKind}
+                    onChange={(e) => setCalEvKind(e.target.value as CalendarEventKind)}
+                  >
+                    {Object.entries(CAL_EVENT_LABELS).map(([k, lbl]) => (
+                      <option key={k} value={k}>
+                        {lbl}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {calEvKind === 'academic_event' && (
+                  <label className="field-label">
+                    Event type
+                    <select
+                      className="field"
+                      value={calEvTypePreset}
+                      onChange={(e) => setCalEvTypePreset(e.target.value)}
+                    >
+                      {ACADEMIC_EVENT_PRESETS.map((p) => (
+                        <option key={p} value={p}>
+                          {p === 'Other' ? 'Other (type custom)' : p}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {calEvKind === 'academic_event' && calEvTypePreset === 'Other' && (
+                  <label className="field-label">
+                    Custom event type
+                    <input
+                      className="field"
+                      value={calEvCustomType}
+                      onChange={(e) => setCalEvCustomType(e.target.value)}
+                      placeholder="e.g. Tech Fest"
+                    />
+                  </label>
+                )}
+                <label className="field-label" style={{ flex: '1 1 240px' }}>
+                  Event name / Description
+                  <input
+                    className="field"
+                    value={calEvLabel}
+                    onChange={(e) => setCalEvLabel(e.target.value)}
+                    placeholder="Smart India Hackathon / Mid-sem internal exam / Regional holiday"
+                  />
+                </label>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: '0.86rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={calEvNoAttendance}
+                    onChange={(e) => setCalEvNoAttendance(e.target.checked)}
+                  />
+                  <span>
+                    Declare <strong>No-attendance day</strong> (overrides scheduled classes/labs &amp; notifies faculty, students, Dean, CoE, VC)
+                  </span>
+                </label>
+                <div style={{ display: 'inline-flex', gap: 8 }}>
+                  <button type="submit" className="btn" disabled={calBusy}>
+                    Add to list
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={calBusy}
+                    onClick={() => void declareEventLive()}
+                  >
+                    {calBusy ? 'Declaring…' : calEvNoAttendance ? 'Declare No-attendance & notify' : 'Add event live'}
+                  </button>
+                </div>
+              </div>
             </form>
           </section>
+
+          {/* Visual Monthly Academic Calendar */}
+          {calFirstDay && calLastDay && (
+            <section
+              style={{
+                padding: 16,
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                background: 'var(--surface)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+                <div>
+                  <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>
+                    Academic calendar view {calApproved ? '· Approved' : '· Preview'}
+                  </h2>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: 2 }}>
+                    Shows working days, Saturday holidays, exams, and HoD-declared academic/no-attendance events.
+                  </p>
+                </div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <button type="button" className="btn field-sm" onClick={() => setCalMonth((m) => shiftMonth(m, -1))}>
+                    Prev
+                  </button>
+                  <span className="mono" style={{ fontSize: '0.88rem', minWidth: 90, textAlign: 'center' }}>
+                    {calMonth}
+                  </span>
+                  <button type="button" className="btn field-sm" onClick={() => setCalMonth((m) => shiftMonth(m, 1))}>
+                    Next
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+                  <div key={d} className="mono" style={{ fontSize: '0.75rem', color: 'var(--muted)', padding: '4px 6px', textAlign: 'center' }}>
+                    {d}
+                  </div>
+                ))}
+                {buildMonthGrid(calMonth).map((iso, idx) => {
+                  if (!iso) {
+                    return <div key={`empty-${idx}`} style={{ minHeight: 72, borderRadius: 6, background: 'rgba(0,0,0,0.02)' }} />;
+                  }
+                  const ev = calEvents.find((e) => e.day === iso);
+                  const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+                  const isSunday = dow === 0;
+                  const isSatHol = isSaturdayHolidayForRule(iso, calSatRule);
+                  const inTerm = iso >= calFirstDay && iso <= calLastDay;
+                  const isEndsem = calEndsemDate === iso;
+                  const isFirst = calFirstDay === iso;
+                  const isLast = calLastDay === iso;
+                  const bg = ev?.no_attendance
+                    ? '#FFF2E6'
+                    : ev
+                      ? '#E8F3F1'
+                      : isSunday || isSatHol
+                        ? '#F4F3EE'
+                        : inTerm
+                          ? '#FFFFFF'
+                          : '#FAFAF8';
+                  return (
+                    <div
+                      key={iso}
+                      style={{
+                        minHeight: 72,
+                        padding: 6,
+                        borderRadius: 6,
+                        border: isFirst || isLast || isEndsem ? '1.5px solid #0E5E52' : '1px solid var(--border)',
+                        background: bg,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 3,
+                        fontSize: '0.75rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="mono" style={{ fontWeight: 600 }}>{Number(iso.slice(8, 10))}</span>
+                        {(isSunday || isSatHol) && !ev && (
+                          <span style={{ fontSize: '0.66rem', color: 'var(--muted)' }}>
+                            {isSunday ? 'Sun' : 'Sat off'}
+                          </span>
+                        )}
+                      </div>
+                      {isFirst && <span style={{ fontSize: '0.68rem', color: '#0E5E52', fontWeight: 600 }}>First day</span>}
+                      {isLast && <span style={{ fontSize: '0.68rem', color: '#0E5E52', fontWeight: 600 }}>Last day</span>}
+                      {isEndsem && <span style={{ fontSize: '0.68rem', color: '#9A3412', fontWeight: 600 }}>End-sem</span>}
+                      {ev && (
+                        <div
+                          style={{
+                            fontSize: '0.68rem',
+                            lineHeight: 1.25,
+                            color: ev.no_attendance ? '#9A3412' : '#0E5E52',
+                            fontWeight: 600,
+                            overflowWrap: 'anywhere',
+                          }}
+                        >
+                          {ev.event_type ? `${ev.event_type}: ` : ''}
+                          {ev.label}
+                          {ev.no_attendance ? ' (No-att.)' : ''}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           <div
             style={{

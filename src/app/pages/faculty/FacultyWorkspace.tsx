@@ -175,7 +175,7 @@ export function FacultyWorkspace() {
       };
       const { data: evRows } = await supabase
         .from('academic_calendar_events')
-        .select('day, kind, label')
+        .select('day, kind, event_type, label, no_attendance')
         .eq('calendar_id', cal.id)
         .order('day');
       departmentCalendar = {

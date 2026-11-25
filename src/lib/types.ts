@@ -208,6 +208,7 @@ export interface SessionRow {
   btl: number;
   scheduled_date: string | null;
   status: SessionStatus;
+  hod_override_event?: string | null;
   pre_open: string | null;
   pre_close: string | null;
   post_close: string | null;
