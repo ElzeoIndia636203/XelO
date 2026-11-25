@@ -195,7 +195,7 @@ export function LoginPage() {
             <Elzeo dark />
           </div>
           <div style={{ fontSize: 12, color: '#A8A69E' }}>
-            Elzeo Future Technologies Pvt Ltd, India · Sanjivani University deployment
+            Elzeo Future Technologies Pvt Ltd, India · For AI Enabled HEIs
           </div>
         </div>
       </section>
