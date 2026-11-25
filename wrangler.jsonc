@@ -1,0 +1,9 @@
+{
+  "name": "xelo",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-23",
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS"
+  }
+}
