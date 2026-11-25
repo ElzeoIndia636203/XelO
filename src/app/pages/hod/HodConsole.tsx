@@ -191,17 +191,61 @@ interface DeptOutcomeRow {
 }
 
 const STANDARD_NBA_POS: ReadonlyArray<{ code: string; statement: string }> = [
-  { code: 'PO1', statement: 'Engineering knowledge' },
-  { code: 'PO2', statement: 'Problem analysis' },
-  { code: 'PO3', statement: 'Design/development of solutions' },
-  { code: 'PO4', statement: 'Conduct investigations of complex problems' },
-  { code: 'PO5', statement: 'Engineering tool usage (modern tool usage)' },
-  { code: 'PO6', statement: 'The engineer and the world (society, environment & sustainability)' },
-  { code: 'PO7', statement: 'Ethics' },
-  { code: 'PO8', statement: 'Individual and collaborative team work' },
-  { code: 'PO9', statement: 'Communication' },
-  { code: 'PO10', statement: 'Project management and finance' },
-  { code: 'PO11', statement: 'Life-long learning' },
+  {
+    code: 'PO1',
+    statement:
+      'Engineering Knowledge: Apply the knowledge of mathematics, science, engineering fundamentals, and an engineering specialization to the solution of complex engineering problems.',
+  },
+  {
+    code: 'PO2',
+    statement:
+      'Problem Analysis: Identify, formulate, review research literature, and analyze complex engineering problems reaching substantiated conclusions using first principles of mathematics, natural sciences, and engineering sciences.',
+  },
+  {
+    code: 'PO3',
+    statement:
+      'Design/Development of Solutions: Design solutions for complex engineering problems and design system components or processes that meet the specified needs with appropriate consideration for public health and safety, and cultural, societal, and environmental considerations.',
+  },
+  {
+    code: 'PO4',
+    statement:
+      'Conduct Investigations of Complex Problems: Use research-based knowledge and research methods including design of experiments, analysis and interpretation of data, and synthesis of the information to provide valid conclusions.',
+  },
+  {
+    code: 'PO5',
+    statement:
+      'Engineering Tool Usage: Create, select, and apply appropriate techniques, resources, and modern engineering and IT tools including prediction and modeling to complex engineering activities with an understanding of the limitations.',
+  },
+  {
+    code: 'PO6',
+    statement:
+      'The Engineer and the World: Analyze and evaluate societal, health, safety, legal, cultural, and environmental aspects while solving complex engineering problems for their impact on sustainable development.',
+  },
+  {
+    code: 'PO7',
+    statement:
+      'Ethics: Apply ethical principles and commit to professional ethics and responsibilities and norms of the engineering practice.',
+  },
+  {
+    code: 'PO8',
+    statement:
+      'Individual and Collaborative Team Work: Function effectively as an individual, and as a member or leader in diverse teams, and in multidisciplinary settings.',
+  },
+  {
+    code: 'PO9',
+    statement:
+      'Communication: Communicate effectively on complex engineering activities with the engineering community and with society at large, such as being able to comprehend and write effective reports and design documentation, make effective presentations, and give and receive clear instructions.',
+  },
+  {
+    code: 'PO10',
+    statement:
+      'Project Management and Finance: Demonstrate knowledge and understanding of engineering and management principles and apply these to one’s own work, as a member and leader in a team, to manage projects and in multidisciplinary environments.',
+  },
+  {
+    code: 'PO11',
+    statement:
+      'Life-Long Learning: Recognize the need for, and have the preparation and ability to engage in independent and life-long learning in the broadest context of technological change.',
+  },
 ];
 
 export default function HodConsole() {
