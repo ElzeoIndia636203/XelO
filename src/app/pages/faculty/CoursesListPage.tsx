@@ -17,25 +17,29 @@ import { errorMessage } from '../../../lib/errors';
 import { useLoad } from '../../../lib/hooks';
 import { useSession } from '../../../lib/session';
 import { fetchAll, rpc, supabase } from '../../../lib/supabase';
-import type { Course, Department } from '../../../lib/types';
+import type { Course, Department, School } from '../../../lib/types';
+
+const CLASS_YEARS = ['I Yr', 'II Yr', 'III Yr', 'IV Yr', 'V Yr'] as const;
 
 export function CoursesListPage() {
   const { profile, institution, signOut } = useSession();
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
+  const [schoolId, setSchoolId] = useState('');
+  const [programme, setProgramme] = useState('B.Tech');
+  const [deptId, setDeptId] = useState(profile?.department_id ?? '');
+  const [year, setYear] = useState('2026-27');
+  const [classYear, setClassYear] = useState<string>('II Yr');
+  const [semester, setSemester] = useState('IV');
   const [code, setCode] = useState('');
   const [title, setTitle] = useState('');
   const [ltpc, setLtpc] = useState('0-0-2-1');
-  const [programme, setProgramme] = useState('B.Tech');
-  const [semester, setSemester] = useState('IV');
-  const [section, setSection] = useState('SY-B');
-  const [year, setYear] = useState('2026-27');
-  const [deptId, setDeptId] = useState(profile?.department_id ?? '');
+  const [labHours, setLabHours] = useState<number>(1);
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
 
   const { data, loading, error, reload } = useLoad(async () => {
-    const [courses, departments] = await Promise.all([
+    const [courses, schools, departments] = await Promise.all([
       fetchAll<Course>((from, to) =>
         supabase
           .from('courses')
@@ -44,26 +48,44 @@ export function CoursesListPage() {
           .order('created_at', { ascending: false })
           .range(from, to),
       ),
+      fetchAll<School>((from, to) =>
+        supabase.from('schools').select('*').order('name').range(from, to),
+      ).catch(() => [] as School[]),
       fetchAll<Department>((from, to) =>
         supabase.from('departments').select('*').order('name').range(from, to),
       ),
     ]);
-    return { courses, departments };
+    return { courses, schools, departments };
   }, [profile?.id]);
+
+  const activeSchoolId =
+    schoolId ||
+    profile?.school_id ||
+    data?.departments.find((d) => d.id === (deptId || profile?.department_id))?.school_id ||
+    data?.schools[0]?.id ||
+    '';
+
+  const visibleDepartments = (data?.departments ?? []).filter(
+    (d) => !activeSchoolId || d.school_id === activeSchoolId,
+  );
+  const activeDeptId =
+    visibleDepartments.find((d) => d.id === (deptId || profile?.department_id))?.id ||
+    visibleDepartments[0]?.id ||
+    '';
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
     setFormErr(null);
     setBusy(true);
     try {
-      const targetDept = deptId || profile?.department_id || data?.departments[0]?.id || null;
+      const targetDept = activeDeptId || profile?.department_id || data?.departments[0]?.id || null;
       const newId = await rpc<string>('create_course', {
         p_code: code,
         p_title: title,
         p_ltpc: ltpc,
         p_programme: programme,
         p_semester: semester,
-        p_section: section,
+        p_section: classYear,
         p_academic_year: year,
         p_department_id: targetDept,
       });
@@ -176,6 +198,88 @@ export function CoursesListPage() {
           {formErr ? <Banner tone="err">{formErr}</Banner> : null}
           <div className="grid-2">
             <label className="field-label">
+              School
+              <select
+                className="field"
+                value={activeSchoolId}
+                onChange={(e) => {
+                  setSchoolId(e.target.value);
+                  setDeptId('');
+                }}
+              >
+                {(data?.schools ?? []).length === 0 ? <option value="">Default school</option> : null}
+                {(data?.schools ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-label">
+              Programme
+              <input
+                className="field"
+                required
+                value={programme}
+                onChange={(e) => setProgramme(e.target.value)}
+                placeholder="B.Tech"
+              />
+            </label>
+          </div>
+          <div className="grid-2">
+            <label className="field-label">
+              Department
+              <select
+                className="field"
+                value={activeDeptId}
+                onChange={(e) => setDeptId(e.target.value)}
+              >
+                {visibleDepartments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.code} · {d.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-label">
+              Academic year
+              <input
+                className="field mono"
+                required
+                value={year}
+                onChange={(e) => setYear(e.target.value)}
+                placeholder="2026-27"
+              />
+            </label>
+          </div>
+          <div className="grid-2">
+            <label className="field-label">
+              Class
+              <select
+                className="field"
+                value={classYear}
+                onChange={(e) => setClassYear(e.target.value)}
+              >
+                {CLASS_YEARS.map((yr) => (
+                  <option key={yr} value={yr}>
+                    {yr}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-label">
+              Semester
+              <input
+                className="field"
+                required
+                value={semester}
+                onChange={(e) => setSemester(e.target.value)}
+                placeholder="IV"
+              />
+            </label>
+          </div>
+          <div className="grid-2">
+            <label className="field-label">
               Course code
               <input
                 className="field mono"
@@ -186,6 +290,18 @@ export function CoursesListPage() {
               />
             </label>
             <label className="field-label">
+              Course title
+              <input
+                className="field"
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Programming in C Lab"
+              />
+            </label>
+          </div>
+          <div className="grid-2">
+            <label className="field-label">
               L-T-P-C
               <input
                 className="field mono"
@@ -195,65 +311,21 @@ export function CoursesListPage() {
                 placeholder="0-0-2-1"
               />
             </label>
-          </div>
-          <label className="field-label">
-            Course title
-            <input
-              className="field"
-              required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Programming in C Lab"
-            />
-          </label>
-          <div className="grid-2">
             <label className="field-label">
-              Programme
+              Number of lab hours
               <input
-                className="field"
-                value={programme}
-                onChange={(e) => setProgramme(e.target.value)}
+                className="field mono"
+                type="number"
+                min={1}
+                required
+                value={labHours}
+                onChange={(e) => setLabHours(Math.max(1, Number(e.target.value) || 1))}
               />
-            </label>
-            <label className="field-label">
-              Department
-              <select
-                className="field"
-                value={deptId || profile?.department_id || data?.departments[0]?.id || ''}
-                onChange={(e) => setDeptId(e.target.value)}
-              >
-                {(data?.departments ?? []).map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.code} · {d.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field-label">
-              Semester
-              <input
-                className="field"
-                value={semester}
-                onChange={(e) => setSemester(e.target.value)}
-              />
-            </label>
-            <label className="field-label">
-              Section
-              <input
-                className="field"
-                value={section}
-                onChange={(e) => setSection(e.target.value)}
-              />
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                1 hour = 2 sessions ({labHours * 2} sessions)
+              </span>
             </label>
           </div>
-          <label className="field-label">
-            Academic year
-            <input
-              className="field mono"
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-            />
-          </label>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
             <button type="button" className="btn" onClick={() => setModalOpen(false)}>
               Cancel
