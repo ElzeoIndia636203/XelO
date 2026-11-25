@@ -301,6 +301,7 @@ export default function HodConsole() {
   const [calApproved, setCalApproved] = useState(false);
   const [calEvents, setCalEvents] = useState<CalendarEventRow[]>([]);
   const [calEvDay, setCalEvDay] = useState('');
+  const [calEvEndDay, setCalEvEndDay] = useState('');
   const [calEvKind, setCalEvKind] = useState<CalendarEventKind>('internal_exam');
   const [calEvLabel, setCalEvLabel] = useState('');
   const [editingEvId, setEditingEvId] = useState<string | null>(null);
@@ -709,26 +710,43 @@ export default function HodConsole() {
   function addCalendarEvent(e: React.FormEvent) {
     e.preventDefault();
     if (!calEvDay || !calEvLabel.trim()) {
-      setErr('Enter a date and label for the holiday/exam day.');
+      setErr('Enter a From date and description for the holiday/exam day.');
       return;
     }
-    if (calEvents.some((ev) => ev.day === calEvDay)) {
-      setErr(`An entry already exists for ${calEvDay}.`);
+    const endIso = calEvEndDay || calEvDay;
+    if (endIso < calEvDay) {
+      setErr('To date must be on or after From date.');
       return;
     }
+
+    const startD = new Date(`${calEvDay}T00:00:00Z`);
+    const endD = new Date(`${endIso}T00:00:00Z`);
+    const days: string[] = [];
+    const cur = new Date(startD.getTime());
+    while (cur <= endD && days.length < 60) {
+      days.push(cur.toISOString().slice(0, 10));
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+
+    const existingDays = new Set(calEvents.map((ev) => ev.day));
+    const additions: CalendarEventRow[] = days
+      .filter((d) => !existingDays.has(d))
+      .map((d) => ({
+        id: `draft-${Date.now()}-${d}`,
+        day: d,
+        kind: calEvKind,
+        label: calEvLabel.trim(),
+      }));
+
+    if (additions.length === 0) {
+      setErr(`All dates in ${calEvDay}..${endIso} are already listed.`);
+      return;
+    }
+
     setErr('');
-    setCalEvents((prev) =>
-      [
-        ...prev,
-        {
-          id: `draft-${Date.now()}-${calEvDay}`,
-          day: calEvDay,
-          kind: calEvKind,
-          label: calEvLabel.trim(),
-        },
-      ].sort((a, b) => a.day.localeCompare(b.day)),
-    );
+    setCalEvents((prev) => [...prev, ...additions].sort((a, b) => a.day.localeCompare(b.day)));
     setCalEvDay('');
+    setCalEvEndDay('');
     setCalEvLabel('');
   }
 
@@ -1629,12 +1647,22 @@ export default function HodConsole() {
               }}
             >
               <label className="field-label">
-                Date
+                From
                 <input
                   className="field mono"
                   type="date"
                   value={calEvDay}
                   onChange={(e) => setCalEvDay(e.target.value)}
+                />
+              </label>
+              <label className="field-label">
+                To (optional)
+                <input
+                  className="field mono"
+                  type="date"
+                  min={calEvDay || undefined}
+                  value={calEvEndDay}
+                  onChange={(e) => setCalEvEndDay(e.target.value)}
                 />
               </label>
               <label className="field-label">
