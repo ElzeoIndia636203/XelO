@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { errorMessage } from '../../../lib/errors';
 import { useSession } from '../../../lib/session';
+import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
 import { RolePortalToggle } from '../../components/RolePortalToggle';
 
 // ── types ──────────────────────────────────────────────────────────────────
@@ -646,6 +647,20 @@ export default function OversightConsole() {
             </div>
           </div>
         )}
+
+        <div style={{ marginTop: 20 }}>
+          <HierarchyMeetingsCard
+            title={
+              role === 'vc'
+                ? 'Notify & schedule meetings (CoE / Deans / HODs / Faculty)'
+                : role === 'coe'
+                  ? 'Notify & schedule meetings (Deans) & HOD requests'
+                  : 'Notify & schedule meetings (HODs) & requests'
+            }
+            allowNotify
+            allowRequest={false}
+          />
+        </div>
       </main>
     </div>
   );

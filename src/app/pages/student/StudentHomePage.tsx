@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarLinkCard } from '../../../components/CalendarLinkCard';
+import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
 import { Banner, Card, Chip, Empty, ErrorNote, Loading } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { formatDateIst, todayIso } from '../../../lib/format';
@@ -469,6 +470,11 @@ export function StudentHomePage() {
         </div>
 
         <CalendarLinkCard />
+        <HierarchyMeetingsCard
+          title="Request meeting with faculty"
+          allowNotify={false}
+          allowRequest
+        />
       </div>
     </StudentShell>
   );

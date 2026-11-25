@@ -4,6 +4,7 @@ import { supabase } from '../../../lib/supabase';
 import { errorMessage } from '../../../lib/errors';
 import { useSession } from '../../../lib/session';
 import { ConsoleShell, type NavItem } from '../../components/ConsoleShell';
+import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
 import { RolePortalToggle } from '../../components/RolePortalToggle';
 
 // ── types ──────────────────────────────────────────────────────────────────
@@ -200,6 +201,21 @@ interface CalendarEventRow {
   label: string;
 }
 
+interface FacultyCourseStatRow {
+  faculty_id: string;
+  faculty_name: string;
+  faculty_email: string;
+  course_id: string;
+  course_code: string;
+  course_title: string;
+  sessions_total: number;
+  sessions_conducted: number;
+  missed_classes: number;
+  streak: number;
+  attendance_pct: number;
+  avg_score_pct: number;
+}
+
 const CAL_EVENT_LABELS: Record<CalendarEventKind, string> = {
   internal_exam: 'Internal exam (no classes)',
   regional_holiday: 'Regional / local holiday',
@@ -269,7 +285,7 @@ export default function HodConsole() {
   const { profile, signOut } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = searchParams.get('tab');
-  const validTabs = ['overview', 'approvals', 'courses', 'outcomes', 'calendar', 'live', 'final'] as const;
+  const validTabs = ['overview', 'approvals', 'courses', 'faculties', 'outcomes', 'calendar', 'live', 'final'] as const;
   const tab: (typeof validTabs)[number] =
     validTabs.includes(initialTab as (typeof validTabs)[number])
       ? (initialTab as (typeof validTabs)[number])
@@ -309,6 +325,11 @@ export default function HodConsole() {
   const [editEvKind, setEditEvKind] = useState<CalendarEventKind>('internal_exam');
   const [editEvLabel, setEditEvLabel] = useState('');
   const [calBusy, setCalBusy] = useState(false);
+  const [facultyStats, setFacultyStats] = useState<FacultyCourseStatRow[]>([]);
+  const [meetingTarget, setMeetingTarget] = useState<FacultyCourseStatRow | null>(null);
+  const [meetingTitle, setMeetingTitle] = useState('');
+  const [meetingAt, setMeetingAt] = useState('');
+  const [meetingNote, setMeetingNote] = useState('');
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [remark, setRemark] = useState('');
   const [remarkFor, setRemarkFor] = useState<string | null>(null);
@@ -321,7 +342,7 @@ export default function HodConsole() {
 
   const loadDeptConfig = useCallback(async () => {
     if (!profile?.department_id) return;
-    const [poRes, calRes] = await Promise.all([
+    const [poRes, calRes, facRes] = await Promise.all([
       supabase
         .from('department_outcomes')
         .select('id, kind, code, statement')
@@ -333,7 +354,12 @@ export default function HodConsole() {
         .select('id, first_working_day, last_working_day, expected_endsem_date, saturday_rule, approved')
         .eq('department_id', profile.department_id)
         .maybeSingle(),
+      supabase.rpc('hod_faculty_summary', { p_department_id: profile.department_id }),
     ]);
+
+    if (!facRes.error && facRes.data) {
+      setFacultyStats((facRes.data as FacultyCourseStatRow[]) ?? []);
+    }
 
     if (poRes.error) {
       setErr(errorMessage(poRes.error.message));
@@ -861,10 +887,36 @@ export default function HodConsole() {
     void loadAll();
   }
 
+  async function scheduleFacultyMeeting(e: React.FormEvent) {
+    e.preventDefault();
+    if (!meetingTarget || !meetingTitle.trim()) return;
+    setCalBusy(true);
+    setErr('');
+    const { error } = await supabase.rpc('send_hierarchy_message', {
+      p_recipient_id: meetingTarget.faculty_id,
+      p_kind: 'meeting_scheduled',
+      p_title: meetingTitle.trim(),
+      p_scheduled_at: meetingAt ? new Date(meetingAt).toISOString() : null,
+      p_note: meetingNote.trim(),
+      p_course_id: meetingTarget.course_id,
+    });
+    setCalBusy(false);
+    if (error) {
+      setErr(errorMessage(error.message));
+      return;
+    }
+    setNotice(`Meeting scheduled with ${meetingTarget.faculty_name} (${meetingTarget.course_code}).`);
+    setMeetingTarget(null);
+    setMeetingTitle('');
+    setMeetingAt('');
+    setMeetingNote('');
+  }
+
   const navItems: NavItem[] = [
     { id: 'overview', label: 'Overview', badge: pendingCount > 0 ? pendingCount : undefined },
     { id: 'approvals', label: 'Approvals', badge: pendingCount > 0 ? pendingCount : undefined },
     { id: 'courses',   label: 'Courses' },
+    { id: 'faculties', label: 'Faculties' },
     { id: 'outcomes',  label: 'POs & PSOs' },
     { id: 'calendar',  label: 'Academic calendar' },
     { id: 'live',      label: 'Live', badge: liveCount > 0 ? liveCount : undefined },
@@ -1198,6 +1250,134 @@ export default function HodConsole() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Faculties ── */}
+      {tab === 'faculties' && (
+        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <h1 style={{ fontSize: '1.35rem', fontWeight: 700 }}>Department faculties</h1>
+            <p style={{ fontSize: '0.84rem', color: 'var(--muted)', marginTop: 4 }}>
+              Track conducted sessions, streak, missed classes, student performance, and schedule meetings with faculty.
+            </p>
+          </div>
+
+          {meetingTarget ? (
+            <form
+              onSubmit={scheduleFacultyMeeting}
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 10,
+                alignItems: 'flex-end',
+                padding: 16,
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                background: 'var(--surface)',
+              }}
+            >
+              <div style={{ width: '100%', fontWeight: 600, fontSize: '0.9rem' }}>
+                Schedule meeting with {meetingTarget.faculty_name} ({meetingTarget.course_code})
+              </div>
+              <label className="field-label" style={{ flex: '1 1 200px' }}>
+                Subject
+                <input
+                  className="field"
+                  required
+                  value={meetingTitle}
+                  onChange={(e) => setMeetingTitle(e.target.value)}
+                  placeholder="Course progress / missed session review"
+                />
+              </label>
+              <label className="field-label">
+                Date & time
+                <input
+                  className="field mono"
+                  type="datetime-local"
+                  value={meetingAt}
+                  onChange={(e) => setMeetingAt(e.target.value)}
+                />
+              </label>
+              <label className="field-label" style={{ flex: '1 1 200px' }}>
+                Note
+                <input
+                  className="field"
+                  value={meetingNote}
+                  onChange={(e) => setMeetingNote(e.target.value)}
+                  placeholder="Cabin / meeting link"
+                />
+              </label>
+              <button type="submit" className="btn btn-primary" disabled={calBusy}>
+                {calBusy ? 'Sending…' : 'Send & notify'}
+              </button>
+              <button type="button" className="btn" onClick={() => setMeetingTarget(null)}>
+                Cancel
+              </button>
+            </form>
+          ) : null}
+
+          {facultyStats.length === 0 ? (
+            <div style={{ padding: 20, border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)' }}>
+              No faculty courses found in your department yet.
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    {['Faculty', 'Course', 'Conducted', 'Streak', 'Missed', 'Attendance', 'Student perf.', ''].map((h, i) => (
+                      <th key={h + i} style={{ textAlign: i === 7 ? 'right' : 'left', padding: '6px 10px', color: 'var(--muted)', fontWeight: 500 }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {facultyStats.map((f) => (
+                    <tr key={f.course_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '10px' }}>
+                        <div style={{ fontWeight: 600 }}>{f.faculty_name}</div>
+                        <div className="mono" style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+                          {f.faculty_email}
+                        </div>
+                      </td>
+                      <td style={{ padding: '10px' }}>
+                        <span className="mono" style={{ fontWeight: 600 }}>{f.course_code}</span> · {f.course_title}
+                      </td>
+                      <td className="mono" style={{ padding: '10px' }}>
+                        {f.sessions_conducted}/{f.sessions_total}
+                      </td>
+                      <td className="mono" style={{ padding: '10px' }}>{f.streak}</td>
+                      <td className="mono" style={{ padding: '10px', color: f.missed_classes > 0 ? '#dc2626' : 'var(--muted)' }}>
+                        {f.missed_classes}
+                      </td>
+                      <td className="mono" style={{ padding: '10px' }}>{f.attendance_pct}%</td>
+                      <td className="mono" style={{ padding: '10px' }}>{f.avg_score_pct}%</td>
+                      <td style={{ padding: '10px', textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          className="btn field-sm"
+                          onClick={() => {
+                            setMeetingTarget(f);
+                            setMeetingTitle(`Review: ${f.course_code} (${f.course_title})`);
+                          }}
+                        >
+                          Schedule meeting
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <HierarchyMeetingsCard
+            title="Meetings & notifications (Faculty / Dean / CoE / VC)"
+            allowNotify
+            allowRequest
+          />
         </div>
       )}
 
