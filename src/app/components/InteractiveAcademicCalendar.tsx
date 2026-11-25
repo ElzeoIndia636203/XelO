@@ -348,7 +348,7 @@ export function InteractiveAcademicCalendar({
             </div>
           )}
 
-          {contacts.length > 0 && (
+          {contacts.length > 0 ? (
             <form onSubmit={submitMeetingFromDay} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', paddingTop: 6, borderTop: '1px solid var(--border)' }}>
               <label className="field-label" style={{ minWidth: 200 }}>
                 Contact
@@ -386,6 +386,10 @@ export function InteractiveAcademicCalendar({
                 {busy ? 'Sending…' : 'Send / Schedule'}
               </button>
             </form>
+          ) : (
+            <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+              No hierarchy contacts available to schedule/request a meeting yet. Ensure migrations are pushed and Faculty / Dean / CoE / VC accounts exist in your institution.
+            </div>
           )}
 
           {msg && (

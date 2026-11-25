@@ -348,6 +348,7 @@ export default function HodConsole() {
   const [editEvKind, setEditEvKind] = useState<CalendarEventKind>('internal_exam');
   const [editEvLabel, setEditEvLabel] = useState('');
   const [calBusy, setCalBusy] = useState(false);
+  const calEventFormRef = useRef<HTMLFormElement | null>(null);
   const [facultyStats, setFacultyStats] = useState<FacultyCourseStatRow[]>([]);
   const [meetingTarget, setMeetingTarget] = useState<FacultyCourseStatRow | null>(null);
   const [meetingTitle, setMeetingTitle] = useState('');
@@ -1915,6 +1916,7 @@ export default function HodConsole() {
             )}
 
             <form
+              ref={calEventFormRef}
               onSubmit={addCalendarEvent}
               style={{
                 display: 'flex',
@@ -2038,6 +2040,7 @@ export default function HodConsole() {
               setCalEvDay(iso);
               setCalEvEndDay(iso);
               setNotice(`Selected ${iso} in the event form above. Choose category/event type and click Add event live.`);
+              calEventFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }}
           />
 
