@@ -202,6 +202,11 @@ export function Modal({
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -210,12 +215,13 @@ export function Modal({
     const focusables = el?.querySelectorAll<HTMLElement>(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
     );
-    focusables?.[0]?.focus();
+    const firstInput = el?.querySelector<HTMLElement>('input, select, textarea');
+    (firstInput ?? focusables?.[0])?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key === 'Tab' && focusables && focusables.length > 0) {
@@ -237,7 +243,7 @@ export function Modal({
       document.removeEventListener('keydown', onKeyDown);
       prev?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
