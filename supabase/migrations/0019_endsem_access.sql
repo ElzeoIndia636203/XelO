@@ -135,32 +135,36 @@ BEGIN
     SELECT 1 FROM information_schema.tables
     WHERE table_schema = 'storage' AND table_name = 'objects'
   ) THEN
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_policies
-      WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'proctor_student_insert'
-    ) THEN
-      EXECUTE $p$
-        CREATE POLICY proctor_student_insert ON storage.objects
-          FOR INSERT TO authenticated
-          WITH CHECK (
-            bucket_id = 'proctor'
-            AND (storage.foldername(name))[1] = auth.uid()::text
-          )
-      $p$;
-    END IF;
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'proctor_student_insert'
+      ) THEN
+        EXECUTE $p$
+          CREATE POLICY proctor_student_insert ON storage.objects
+            FOR INSERT TO authenticated
+            WITH CHECK (
+              bucket_id = 'proctor'
+              AND (storage.foldername(name))[1] = auth.uid()::text
+            )
+        $p$;
+      END IF;
 
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_policies
-      WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'proctor_staff_select'
-    ) THEN
-      EXECUTE $p$
-        CREATE POLICY proctor_staff_select ON storage.objects
-          FOR SELECT TO authenticated
-          USING (
-            bucket_id = 'proctor'
-            AND my_role() IN ('faculty', 'hod', 'dean', 'coe', 'vc', 'super_admin')
-          )
-      $p$;
-    END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'proctor_staff_select'
+      ) THEN
+        EXECUTE $p$
+          CREATE POLICY proctor_staff_select ON storage.objects
+            FOR SELECT TO authenticated
+            USING (
+              bucket_id = 'proctor'
+              AND my_role() IN ('faculty', 'hod', 'dean', 'coe', 'vc', 'super_admin')
+            )
+        $p$;
+      END IF;
+    EXCEPTION WHEN insufficient_privilege THEN
+      NULL;
+    END;
   END IF;
 END $$;

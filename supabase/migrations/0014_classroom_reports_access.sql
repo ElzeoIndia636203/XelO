@@ -106,35 +106,39 @@ BEGIN
     SELECT 1 FROM information_schema.tables
     WHERE table_schema = 'storage' AND table_name = 'objects'
   ) THEN
-    EXECUTE 'DROP POLICY IF EXISTS class_files_select ON storage.objects';
-    EXECUTE 'DROP POLICY IF EXISTS class_files_insert ON storage.objects';
-    EXECUTE 'DROP POLICY IF EXISTS class_files_delete ON storage.objects';
+    BEGIN
+      EXECUTE 'DROP POLICY IF EXISTS class_files_select ON storage.objects';
+      EXECUTE 'DROP POLICY IF EXISTS class_files_insert ON storage.objects';
+      EXECUTE 'DROP POLICY IF EXISTS class_files_delete ON storage.objects';
 
-    EXECUTE $p$
-      CREATE POLICY class_files_select ON storage.objects
-        FOR SELECT TO authenticated
-        USING (
-          bucket_id = ''class-files''
-          AND public.can_read_course(public.storage_course_id_from_path(name))
-        )
-    $p$;
+      EXECUTE $p$
+        CREATE POLICY class_files_select ON storage.objects
+          FOR SELECT TO authenticated
+          USING (
+            bucket_id = 'class-files'
+            AND public.can_read_course(public.storage_course_id_from_path(name))
+          )
+      $p$;
 
-    EXECUTE $p$
-      CREATE POLICY class_files_insert ON storage.objects
-        FOR INSERT TO authenticated
-        WITH CHECK (
-          bucket_id = ''class-files''
-          AND public.is_course_faculty(public.storage_course_id_from_path(name))
-        )
-    $p$;
+      EXECUTE $p$
+        CREATE POLICY class_files_insert ON storage.objects
+          FOR INSERT TO authenticated
+          WITH CHECK (
+            bucket_id = 'class-files'
+            AND public.is_course_faculty(public.storage_course_id_from_path(name))
+          )
+      $p$;
 
-    EXECUTE $p$
-      CREATE POLICY class_files_delete ON storage.objects
-        FOR DELETE TO authenticated
-        USING (
-          bucket_id = ''class-files''
-          AND public.is_course_faculty(public.storage_course_id_from_path(name))
-        )
-    $p$;
+      EXECUTE $p$
+        CREATE POLICY class_files_delete ON storage.objects
+          FOR DELETE TO authenticated
+          USING (
+            bucket_id = 'class-files'
+            AND public.is_course_faculty(public.storage_course_id_from_path(name))
+          )
+      $p$;
+    EXCEPTION WHEN insufficient_privilege THEN
+      NULL;
+    END;
   END IF;
 END $$;
