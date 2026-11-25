@@ -105,3 +105,4 @@ The PRD's API groups map to database functions (`rpc`) and edge functions. The c
 ## Deployment & Auth decisions — 2026-11-25
 
 - **OTP sign-in for first-time invited users (`src/app/pages/LoginPage.tsx`):** Switched `signInWithOtp` from `shouldCreateUser: false` to `shouldCreateUser: true`. With `shouldCreateUser: false`, GoTrue rejects invited users who have a `public.invites` row but no `auth.users` row yet (`422 otp_disabled`) before the database sign-up gate runs. Invites and email domains remain strictly enforced server-side by `preflight_sign_in` and the `auth.users` `BEFORE INSERT` trigger (`0003_workflows.sql`).
+- **Gemini LLM provider (`supabase/functions/_shared/llm.ts`):** Added native Gemini API support (`GEMINI_API_KEY`, defaulting `AI_MODEL` to `gemini-2.5-flash` with `responseMimeType: 'application/json'`) while retaining `ANTHROPIC_API_KEY` fallback.

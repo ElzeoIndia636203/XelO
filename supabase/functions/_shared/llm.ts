@@ -6,51 +6,102 @@ export interface LlmCallOptions {
   maxTokens?: number;
 }
 
+async function callGeminiText(
+  apiKey: string,
+  model: string,
+  system: string,
+  user: string,
+  maxTokens: number,
+): Promise<{ ok: true; text: string } | { ok: false; status: number }> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: 'user', parts: [{ text: user }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        maxOutputTokens: maxTokens,
+      },
+    }),
+  });
+  if (!res.ok) return { ok: false, status: res.status };
+  const body = (await res.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const text =
+    body.candidates?.[0]?.content?.parts
+      ?.map((p) => p.text ?? '')
+      .join('\n') ?? '';
+  return { ok: true, text };
+}
+
+async function callAnthropicText(
+  apiKey: string,
+  model: string,
+  system: string,
+  user: string,
+  maxTokens: number,
+): Promise<{ ok: true; text: string } | { ok: false; status: number }> {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: 'user', content: user }],
+    }),
+  });
+  if (!res.ok) return { ok: false, status: res.status };
+  const body = (await res.json()) as {
+    content?: Array<{ type: string; text?: string }>;
+  };
+  const text =
+    body.content
+      ?.filter((c) => c.type === 'text' && typeof c.text === 'string')
+      .map((c) => c.text)
+      .join('\n') ?? '';
+  return { ok: true, text };
+}
+
 export async function callLlmJson<T>(
   opts: LlmCallOptions,
   validate: (parsed: unknown) => T,
   maxAttempts = 2,
 ): Promise<T> {
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
-  const model = Deno.env.get('AI_MODEL') ?? 'claude-sonnet-4-20250514';
-  if (!apiKey) {
+  const geminiKey = Deno.env.get('GEMINI_API_KEY');
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!geminiKey && !anthropicKey) {
     throw new Error('ai_not_configured');
   }
+
+  const useGemini = Boolean(geminiKey);
+  const model =
+    Deno.env.get('AI_MODEL') ??
+    (useGemini ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514');
+  const maxTokens = opts.maxTokens ?? (useGemini ? 4096 : 2048);
 
   let lastErr: unknown = new Error('ai_failed');
   let prompt = opts.user;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: opts.maxTokens ?? 2048,
-        system: opts.system,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
+    const out = useGemini
+      ? await callGeminiText(geminiKey!, model, opts.system, prompt, maxTokens)
+      : await callAnthropicText(anthropicKey!, model, opts.system, prompt, maxTokens);
 
-    if (!res.ok) {
-      lastErr = new Error(`ai_http_${res.status}`);
+    if (!out.ok) {
+      lastErr = new Error(`ai_http_${out.status}`);
       continue;
     }
 
-    const body = (await res.json()) as {
-      content?: Array<{ type: string; text?: string }>;
-    };
-    const text = body.content
-      ?.filter((c) => c.type === 'text' && typeof c.text === 'string')
-      .map((c) => c.text)
-      .join('\n') ?? '';
-
     try {
-      const parsed = extractJsonObject(text);
+      const parsed = extractJsonObject(out.text);
       return validate(parsed);
     } catch (err) {
       lastErr = err;
