@@ -53,13 +53,12 @@ const PO_KEYWORDS: Record<string, readonly string[]> = {
   PO3: ['design', 'develop', 'implement', 'build', 'solution', 'system', 'program', 'software', 'architecture'],
   PO4: ['investigate', 'experiment', 'test', 'verify', 'validate', 'research', 'data', 'evaluate'],
   PO5: ['tool', 'ide', 'compiler', 'git', 'python', 'java', 'rust', 'go', 'c++', 'modern', 'library', 'framework'],
-  PO6: ['society', 'safety', 'health', 'legal', 'cultural', 'public'],
-  PO7: ['environment', 'sustainability', 'energy', 'green'],
-  PO8: ['ethic', 'plagiarism', 'integrity', 'privacy', 'security'],
-  PO9: ['team', 'collaborat', 'group', 'individual'],
-  PO10: ['communicat', 'report', 'document', 'present', 'viva'],
-  PO11: ['project', 'manage', 'schedule', 'cost', 'plan'],
-  PO12: ['learn', 'lifelong', 'life-long', 'adapt', 'self'],
+  PO6: ['society', 'safety', 'health', 'legal', 'cultural', 'public', 'environment', 'sustainability', 'world', 'green'],
+  PO7: ['ethic', 'plagiarism', 'integrity', 'privacy', 'security'],
+  PO8: ['team', 'collaborat', 'group', 'individual'],
+  PO9: ['communicat', 'report', 'document', 'present', 'viva'],
+  PO10: ['project', 'manage', 'schedule', 'cost', 'plan', 'finance'],
+  PO11: ['learn', 'lifelong', 'life-long', 'adapt', 'self'],
 };
 
 export function inferCoPoLevels(

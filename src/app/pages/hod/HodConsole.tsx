@@ -195,14 +195,13 @@ const STANDARD_NBA_POS: ReadonlyArray<{ code: string; statement: string }> = [
   { code: 'PO2', statement: 'Problem analysis' },
   { code: 'PO3', statement: 'Design/development of solutions' },
   { code: 'PO4', statement: 'Conduct investigations of complex problems' },
-  { code: 'PO5', statement: 'Modern tool usage' },
-  { code: 'PO6', statement: 'The engineer and society' },
-  { code: 'PO7', statement: 'Environment and sustainability' },
-  { code: 'PO8', statement: 'Ethics' },
-  { code: 'PO9', statement: 'Individual and team work' },
-  { code: 'PO10', statement: 'Communication' },
-  { code: 'PO11', statement: 'Project management and finance' },
-  { code: 'PO12', statement: 'Life-long learning' },
+  { code: 'PO5', statement: 'Engineering tool usage (modern tool usage)' },
+  { code: 'PO6', statement: 'The engineer and the world (society, environment & sustainability)' },
+  { code: 'PO7', statement: 'Ethics' },
+  { code: 'PO8', statement: 'Individual and collaborative team work' },
+  { code: 'PO9', statement: 'Communication' },
+  { code: 'PO10', statement: 'Project management and finance' },
+  { code: 'PO11', statement: 'Life-long learning' },
 ];
 
 export default function HodConsole() {
@@ -222,9 +221,10 @@ export default function HodConsole() {
   const [atRisk, setAtRisk] = useState<AtRiskStudent[]>([]);
   const [liveLabs, setLiveLabs] = useState<LiveLabRow[]>([]);
   const [deptOutcomes, setDeptOutcomes] = useState<DeptOutcomeRow[]>([]);
-  const [poKind, setPoKind] = useState<'PO' | 'PSO'>('PO');
   const [poCode, setPoCode] = useState('');
   const [poStmt, setPoStmt] = useState('');
+  const [psoCode, setPsoCode] = useState('');
+  const [psoStmt, setPsoStmt] = useState('');
   const [poBusy, setPoBusy] = useState(false);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [remark, setRemark] = useState('');
@@ -475,13 +475,18 @@ export default function HodConsole() {
     else loadAll();
   }
 
-  async function addDeptOutcome(e: React.FormEvent) {
+  async function addDeptOutcome(e: React.FormEvent, kind: 'PO' | 'PSO') {
     e.preventDefault();
-    if (!profile?.department_id || !profile.institution_id) return;
-    const cleanCode = poCode.trim().toUpperCase();
-    const cleanStmt = poStmt.trim();
+    if (!profile?.department_id || !profile.institution_id) {
+      setErr('Your HOD profile is missing a department assignment.');
+      return;
+    }
+    const rawCode = kind === 'PO' ? poCode : psoCode;
+    const rawStmt = kind === 'PO' ? poStmt : psoStmt;
+    const cleanCode = rawCode.trim().toUpperCase();
+    const cleanStmt = rawStmt.trim();
     if (!cleanCode) {
-      setErr('Enter a PO or PSO code (e.g. PO1, PSO1).');
+      setErr(`Enter a ${kind} code (e.g. ${kind === 'PO' ? 'PO1' : 'PSO1'}).`);
       return;
     }
     setPoBusy(true);
@@ -489,7 +494,7 @@ export default function HodConsole() {
     const { error } = await supabase.from('department_outcomes').insert({
       institution_id: profile.institution_id,
       department_id: profile.department_id,
-      kind: poKind,
+      kind,
       code: cleanCode,
       statement: cleanStmt,
       created_by: profile.id,
@@ -499,14 +504,22 @@ export default function HodConsole() {
       setErr(errorMessage(error.message));
       return;
     }
-    setPoCode('');
-    setPoStmt('');
+    if (kind === 'PO') {
+      setPoCode('');
+      setPoStmt('');
+    } else {
+      setPsoCode('');
+      setPsoStmt('');
+    }
     setNotice(`${cleanCode} registered for your department.`);
     void loadAll();
   }
 
   async function seedStandardPos() {
-    if (!profile?.department_id || !profile.institution_id) return;
+    if (!profile?.department_id || !profile.institution_id) {
+      setErr('Your HOD profile is missing a department assignment.');
+      return;
+    }
     const existing = new Set(deptOutcomes.map((o) => o.code.toUpperCase()));
     const toInsert = STANDARD_NBA_POS.filter((p) => !existing.has(p.code)).map((p) => ({
       institution_id: profile.institution_id,
@@ -517,7 +530,7 @@ export default function HodConsole() {
       created_by: profile.id,
     }));
     if (toInsert.length === 0) {
-      setNotice('All 12 standard NBA POs are already registered.');
+      setNotice('All 11 standard NBA POs are already registered.');
       return;
     }
     setPoBusy(true);
@@ -886,132 +899,226 @@ export default function HodConsole() {
 
       {/* ── POs & PSOs ── */}
       {tab === 'outcomes' && (
-        <div style={{ padding: 24 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-            <div>
-              <h1 style={{ fontSize: '1.35rem', fontWeight: 700 }}>PO & PSO registry</h1>
-              <p style={{ fontSize: '0.84rem', color: 'var(--muted)', marginTop: 4 }}>
-                Registered POs and PSOs appear automatically in the CO–PO matrix during faculty course setup.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void seedStandardPos()}
-              disabled={poBusy}
-              style={{
-                padding: '7px 14px',
-                borderRadius: 6,
-                border: '1px solid var(--border)',
-                background: 'var(--surface)',
-                cursor: 'pointer',
-                fontSize: '0.84rem',
-              }}
-            >
-              Load standard NBA POs (PO1–PO12)
-            </button>
+        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 28 }}>
+          <div>
+            <h1 style={{ fontSize: '1.35rem', fontWeight: 700 }}>PO & PSO registry</h1>
+            <p style={{ fontSize: '0.84rem', color: 'var(--muted)', marginTop: 4 }}>
+              Registered POs and PSOs appear automatically in the CO–PO matrix during faculty course setup.
+            </p>
           </div>
 
-          <form
-            onSubmit={addDeptOutcome}
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 10,
-              alignItems: 'flex-end',
-              padding: 16,
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              background: 'var(--surface)',
-              marginBottom: 20,
-            }}
-          >
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.8rem' }}>
-              Type
-              <select
-                value={poKind}
-                onChange={(e) => setPoKind(e.target.value as 'PO' | 'PSO')}
-                style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)' }}
+          {/* Section 1: Programme Outcomes (POs) */}
+          <section>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>Programme Outcomes (PO1–PO11)</h2>
+              <button
+                type="button"
+                onClick={() => void seedStandardPos()}
+                disabled={poBusy}
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  cursor: 'pointer',
+                  fontSize: '0.84rem',
+                }}
               >
-                <option value="PO">PO</option>
-                <option value="PSO">PSO</option>
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.8rem' }}>
-              Code
-              <input
-                value={poCode}
-                onChange={(e) => setPoCode(e.target.value)}
-                placeholder={poKind === 'PO' ? 'PO1' : 'PSO1'}
-                style={{ width: 110, padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontFamily: 'var(--mono)' }}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.8rem', flex: '1 1 280px' }}>
-              Statement
-              <input
-                value={poStmt}
-                onChange={(e) => setPoStmt(e.target.value)}
-                placeholder="Engineering knowledge / Programme specific outcome description"
-                style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)' }}
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={poBusy}
+                Load standard NBA POs (PO1–PO11)
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => void addDeptOutcome(e, 'PO')}
               style={{
-                padding: '8px 16px',
-                borderRadius: 6,
-                border: 'none',
-                background: 'var(--accent)',
-                color: '#fff',
-                fontWeight: 600,
-                cursor: 'pointer',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 10,
+                alignItems: 'flex-end',
+                padding: 16,
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                background: 'var(--surface)',
+                marginBottom: 14,
               }}
             >
-              Add {poKind}
-            </button>
-          </form>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.8rem' }}>
+                Code
+                <input
+                  value={poCode}
+                  onChange={(e) => setPoCode(e.target.value)}
+                  placeholder="PO1"
+                  style={{ width: 110, padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontFamily: 'var(--mono)' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.8rem', flex: '1 1 280px' }}>
+                Statement
+                <input
+                  value={poStmt}
+                  onChange={(e) => setPoStmt(e.target.value)}
+                  placeholder="Engineering knowledge"
+                  style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)' }}
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={poBusy}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Add PO
+              </button>
+            </form>
 
-          {deptOutcomes.length === 0 ? (
-            <div style={{ padding: 24, border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)' }}>
-              No POs or PSOs registered for your department yet. Add one above or load standard NBA POs.
-            </div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['Type', 'Code', 'Statement', ''].map((h) => (
-                    <th key={h} style={{ textAlign: 'left', padding: '6px 12px', color: 'var(--muted)', fontWeight: 500 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {deptOutcomes.map((o) => (
-                  <tr key={o.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '10px 12px', fontFamily: 'var(--mono)' }}>{o.kind}</td>
-                    <td style={{ padding: '10px 12px', fontFamily: 'var(--mono)', fontWeight: 600 }}>{o.code}</td>
-                    <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{o.statement || '—'}</td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        disabled={poBusy}
-                        onClick={() => void deleteDeptOutcome(o.id, o.code)}
-                        style={{
-                          padding: '4px 10px',
-                          borderRadius: 6,
-                          border: '1px solid var(--border)',
-                          background: 'transparent',
-                          cursor: 'pointer',
-                          fontSize: '0.8rem',
-                        }}
-                      >
-                        Remove
-                      </button>
-                    </td>
+            {deptOutcomes.filter((o) => o.kind === 'PO').length === 0 ? (
+              <div style={{ padding: 20, border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)', fontSize: '0.86rem' }}>
+                No POs registered yet. Add one above or click Load standard NBA POs (PO1–PO11).
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    {['Code', 'Statement', ''].map((h) => (
+                      <th key={h} style={{ textAlign: 'left', padding: '6px 12px', color: 'var(--muted)', fontWeight: 500 }}>{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                </thead>
+                <tbody>
+                  {deptOutcomes
+                    .filter((o) => o.kind === 'PO')
+                    .map((o) => (
+                      <tr key={o.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '10px 12px', fontFamily: 'var(--mono)', fontWeight: 600, width: 90 }}>{o.code}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{o.statement || '—'}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', width: 90 }}>
+                          <button
+                            type="button"
+                            disabled={poBusy}
+                            onClick={() => void deleteDeptOutcome(o.id, o.code)}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              border: '1px solid var(--border)',
+                              background: 'transparent',
+                              cursor: 'pointer',
+                              fontSize: '0.8rem',
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+
+          {/* Section 2: Programme Specific Outcomes (PSOs) */}
+          <section>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 600, marginBottom: 12 }}>
+              Programme Specific Outcomes (PSOs)
+            </h2>
+
+            <form
+              onSubmit={(e) => void addDeptOutcome(e, 'PSO')}
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 10,
+                alignItems: 'flex-end',
+                padding: 16,
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                background: 'var(--surface)',
+                marginBottom: 14,
+              }}
+            >
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.8rem' }}>
+                Code
+                <input
+                  value={psoCode}
+                  onChange={(e) => setPsoCode(e.target.value)}
+                  placeholder="PSO1"
+                  style={{ width: 110, padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontFamily: 'var(--mono)' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.8rem', flex: '1 1 280px' }}>
+                Statement
+                <input
+                  value={psoStmt}
+                  onChange={(e) => setPsoStmt(e.target.value)}
+                  placeholder="Programme specific outcome description"
+                  style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)' }}
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={poBusy}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Add PSO
+              </button>
+            </form>
+
+            {deptOutcomes.filter((o) => o.kind === 'PSO').length === 0 ? (
+              <div style={{ padding: 20, border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)', fontSize: '0.86rem' }}>
+                No PSOs registered yet. Add your department&apos;s PSOs above (e.g. PSO1, PSO2).
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    {['Code', 'Statement', ''].map((h) => (
+                      <th key={h} style={{ textAlign: 'left', padding: '6px 12px', color: 'var(--muted)', fontWeight: 500 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {deptOutcomes
+                    .filter((o) => o.kind === 'PSO')
+                    .map((o) => (
+                      <tr key={o.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '10px 12px', fontFamily: 'var(--mono)', fontWeight: 600, width: 90 }}>{o.code}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{o.statement || '—'}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', width: 90 }}>
+                          <button
+                            type="button"
+                            disabled={poBusy}
+                            onClick={() => void deleteDeptOutcome(o.id, o.code)}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              border: '1px solid var(--border)',
+                              background: 'transparent',
+                              cursor: 'pointer',
+                              fontSize: '0.8rem',
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            )}
+          </section>
         </div>
       )}
 

@@ -17,7 +17,7 @@ const ALL_LANGS = [
   { id: 'go', label: 'Go' },
 ] as const;
 
-const DEFAULT_PO_COLS = ['PO1', 'PO2', 'PO3', 'PO5', 'PO12', 'PSO1'] as const;
+const DEFAULT_PO_COLS = ['PO1', 'PO2', 'PO3', 'PO5', 'PO11', 'PSO1'] as const;
 
 interface DeptOutcomeDef {
   code: string;
