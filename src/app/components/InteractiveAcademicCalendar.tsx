@@ -142,7 +142,7 @@ export function InteractiveAcademicCalendar({
     filteredContacts.find((c) => c.id === recipientId)?.id ?? filteredContacts[0]?.id ?? '';
 
   const fetchCalendarData = useCallback(async () => {
-    const [{ data: mData }, { data: cData }, { data: bData }] = await Promise.all([
+    const [{ data: mData }, { data: cData, error: cErr }, { data: bData }] = await Promise.all([
       supabase.rpc('calendar_approved_meetings'),
       supabase.rpc('list_hierarchy_contacts'),
       supabase.rpc('list_busy_days'),
@@ -189,6 +189,7 @@ export function InteractiveAcademicCalendar({
     return {
       meetings: (mData ?? []) as CalendarMeetingItem[],
       contacts: (cData ?? []) as ContactOption[],
+      contactsErr: cErr ? errorMessage(cErr.message) : '',
       busyDays: (bData ?? []) as BusyDayItem[],
       calPayload,
     };
@@ -201,6 +202,9 @@ export function InteractiveAcademicCalendar({
       setMeetings(res.meetings);
       setContacts(res.contacts);
       setMyBusyDays(res.busyDays);
+      if (res.contactsErr) {
+        setMsg({ text: res.contactsErr, ok: false });
+      }
       if (res.calPayload) {
         setLoadedCal(res.calPayload);
       }
