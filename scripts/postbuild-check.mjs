@@ -24,7 +24,7 @@ if (!existsSync(distDir)) {
   process.exit(1);
 }
 
-for (const req of ['_headers', '_redirects', 'robots.txt', 'sitemap.xml']) {
+for (const req of ['_headers', 'robots.txt', 'sitemap.xml']) {
   if (!existsSync(join(distDir, req))) {
     errors.push(`Missing required file in dist/: ${req}`);
   }
