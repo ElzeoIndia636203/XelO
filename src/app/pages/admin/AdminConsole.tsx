@@ -145,6 +145,7 @@ export function AdminConsole() {
           {tab === 'users' ? (
             <UsersTab
               currentUserId={profile.id}
+              currentUserEmail={profile.email}
               institutions={data.institutions}
               schools={data.schools}
               departments={data.departments}

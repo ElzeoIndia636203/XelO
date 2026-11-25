@@ -24,8 +24,22 @@ const ROLE_LABELS: Record<UserRole, string> = {
   student: 'Student',
 };
 
+const HARIPRASATH_K = 'hariprasathk@flyy4.com';
+const GOWTHAM_SIR = 'gowtham.manivel@flyy4.com';
+const DEV_ELZEO = 'dev.elzeo@flyy4.com';
+
+function canManageTarget(actorEmail: string, targetEmail: string): boolean {
+  const actor = actorEmail.trim().toLowerCase();
+  const target = targetEmail.trim().toLowerCase();
+  if (target === HARIPRASATH_K) return false;
+  if (actor === DEV_ELZEO && target === GOWTHAM_SIR) return false;
+  if (target === DEV_ELZEO && actor !== HARIPRASATH_K && actor !== GOWTHAM_SIR) return false;
+  return true;
+}
+
 export function UsersTab({
   currentUserId,
+  currentUserEmail = '',
   institutions,
   schools,
   departments,
@@ -35,6 +49,7 @@ export function UsersTab({
   onRefresh,
 }: {
   currentUserId: string;
+  currentUserEmail?: string;
   institutions: readonly Institution[];
   schools: readonly School[];
   departments: readonly Department[];
@@ -127,6 +142,32 @@ export function UsersTab({
         `${prof.email} ${prof.active ? 'disabled' : 'enabled'}.`,
         true,
       );
+      await onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeUser(prof: Profile) {
+    setBusy(true);
+    try {
+      await rpc('admin_remove_user', { p_user_id: prof.id, p_invite_id: null });
+      onNotify(`${prof.email} removed.`, true);
+      await onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeInvite(inv: Invite) {
+    setBusy(true);
+    try {
+      await rpc('admin_remove_user', { p_user_id: null, p_invite_id: inv.id });
+      onNotify(`Invite for ${inv.email} removed.`, true);
       await onRefresh();
     } catch (err) {
       onNotify(errorMessage(err), false);
@@ -293,15 +334,27 @@ export function UsersTab({
                     <td style={{ textAlign: 'right' }}>
                       {u.id === currentUserId ? (
                         <span style={{ fontSize: 12, color: 'var(--faint)' }}>You</span>
+                      ) : !canManageTarget(currentUserEmail, u.email) ? (
+                        <span style={{ fontSize: 12, color: 'var(--faint)' }}>Protected</span>
                       ) : (
-                        <button
-                          type="button"
-                          className="btn field-sm"
-                          disabled={busy}
-                          onClick={() => void toggleActive(u)}
-                        >
-                          {u.active ? 'Disable' : 'Enable'}
-                        </button>
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            disabled={busy}
+                            onClick={() => void toggleActive(u)}
+                          >
+                            {u.active ? 'Disable' : 'Enable'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            disabled={busy}
+                            onClick={() => void removeUser(u)}
+                          >
+                            Remove
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -320,7 +373,18 @@ export function UsersTab({
                       <Chip tone="warn">Invited</Chip>
                     </td>
                     <td style={{ textAlign: 'right', color: 'var(--muted)', fontSize: 12 }}>
-                      Pending sign-in
+                      {!canManageTarget(currentUserEmail, inv.email) ? (
+                        <span style={{ color: 'var(--faint)' }}>Protected</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn field-sm"
+                          disabled={busy}
+                          onClick={() => void removeInvite(inv)}
+                        >
+                          Remove
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

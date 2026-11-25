@@ -262,13 +262,13 @@ export function SubscriptionsTab({
             </select>
           </label>
           <label className="field-label">
-            For
+            For (university)
             <input
               className="field"
               value={reqScope}
               onChange={(e) => setReqScope(e.target.value)}
-              placeholder="CSE department · 8 faculty"
-              style={{ width: 220 }}
+              placeholder="University name (e.g. Sanjivani University)"
+              style={{ width: 240 }}
             />
           </label>
           <button type="submit" className="btn btn-primary" disabled={busy || institutions.length === 0}>
