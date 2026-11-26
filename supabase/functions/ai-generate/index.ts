@@ -361,7 +361,7 @@ Deno.serve(async (req: Request) => {
           user: `Course: ${course.code} ${course.title}\nSession S${session.n}: ${session.topic}\nCO: ${coRow?.code ?? 'CO1'} (${coRow?.statement ?? ''}), BTL L${session.btl}\nEnabled languages: ${allowedLangs.join(', ')}\nAvoid these existing titles: ${existingTitles.slice(0, 40).join(' | ')}`,
           maxTokens: 8192,
         },
-        (raw) => validateLabCandidatesDraft(raw, allowedLangs, existingTitles),
+        (raw) => validateLabCandidatesDraft(raw, allowedLangs.slice(0, 1), existingTitles),
       );
 
       const judgeUrl = Deno.env.get('JUDGE0_URL');

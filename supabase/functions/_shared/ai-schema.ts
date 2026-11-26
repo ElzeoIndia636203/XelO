@@ -174,16 +174,30 @@ export function validateOutcomesDraft(raw: unknown): OutcomesDraft {
 }
 
 function parseTests(raw: unknown, expectedCount: number): DraftTestCase[] {
-  if (!Array.isArray(raw) || raw.length !== expectedCount) {
+  if (!Array.isArray(raw) || raw.length < expectedCount) {
     throw new Error('invalid_ai_shape');
   }
-  return raw.map((t) => {
+  return raw.slice(0, expectedCount).map((t) => {
     if (!t || typeof t !== 'object') throw new Error('invalid_ai_shape');
     const rec = t as Record<string, unknown>;
-    if (typeof rec.input !== 'string' || typeof rec.expected !== 'string') {
+    const rawIn = rec.input;
+    const rawOut = rec.expected ?? rec.output;
+    const input =
+      typeof rawIn === 'string'
+        ? rawIn
+        : typeof rawIn === 'number' || typeof rawIn === 'boolean'
+          ? String(rawIn)
+          : null;
+    const expected =
+      typeof rawOut === 'string'
+        ? rawOut
+        : typeof rawOut === 'number' || typeof rawOut === 'boolean'
+          ? String(rawOut)
+          : null;
+    if (input === null || expected === null) {
       throw new Error('invalid_ai_shape');
     }
-    return { input: rec.input, expected: rec.expected };
+    return { input, expected };
   });
 }
 
@@ -192,31 +206,33 @@ export function validateLabCandidatesDraft(
   requiredLangs: readonly AllowedLang[] = ['c'],
   existingTitles: readonly string[] = [],
 ): LabCandidateDraft[] {
-  if (!raw || typeof raw !== 'object') {
-    throw new Error('invalid_ai_shape');
-  }
-  const obj = raw as Record<string, unknown>;
-  if (!Array.isArray(obj.candidates) || obj.candidates.length !== 4) {
+  const arr = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === 'object'
+      ? ((raw as Record<string, unknown>).candidates ?? (raw as Record<string, unknown>).questions)
+      : null;
+  if (!Array.isArray(arr) || arr.length < 4) {
     throw new Error('invalid_ai_shape');
   }
 
   const seenTitles = new Set(existingTitles.map((t) => t.trim().toLowerCase()));
   const out: LabCandidateDraft[] = [];
 
-  for (const item of obj.candidates) {
+  for (const item of arr.slice(0, 4)) {
     if (!item || typeof item !== 'object') throw new Error('invalid_ai_shape');
     const row = item as Record<string, unknown>;
     const title = typeof row.title === 'string' ? row.title.trim() : '';
     const statement = typeof row.statement === 'string' ? row.statement.trim() : '';
-    const difficulty = typeof row.difficulty === 'string' ? row.difficulty.trim().toLowerCase() : '';
-    const coCode = typeof row.co_code === 'string' ? row.co_code.trim().toUpperCase() : 'CO1';
+    const rawDiff = typeof row.difficulty === 'string' ? row.difficulty.trim().toLowerCase() : 'medium';
+    const difficulty = (LEVELS as readonly string[]).includes(rawDiff) ? rawDiff : 'medium';
+    const rawCo = typeof row.co_code === 'string' ? row.co_code.trim().toUpperCase() : 'CO1';
+    const coMatch = rawCo.match(/CO\d{1,2}/);
+    const coCode = coMatch ? coMatch[0] : 'CO1';
 
     if (
       title.length < 3 ||
       statement.length < 15 ||
-      seenTitles.has(title.toLowerCase()) ||
-      !(LEVELS as readonly string[]).includes(difficulty) ||
-      !/^CO\d{1,2}$/.test(coCode)
+      seenTitles.has(title.toLowerCase())
     ) {
       throw new Error('invalid_ai_shape');
     }
@@ -226,8 +242,9 @@ export function validateLabCandidatesDraft(
     const hidden_tests = parseTests(row.hidden_tests, 3);
 
     const refMap = new Map<AllowedLang, string>();
-    if (row.references && typeof row.references === 'object') {
-      for (const [k, v] of Object.entries(row.references as Record<string, unknown>)) {
+    const refObj = row.references ?? row.solutions;
+    if (refObj && typeof refObj === 'object') {
+      for (const [k, v] of Object.entries(refObj as Record<string, unknown>)) {
         const lang = k.toLowerCase() as AllowedLang;
         if (VALID_LANGS.includes(lang) && typeof v === 'string' && v.trim().length > 0 && v.length <= 50_000) {
           refMap.set(lang, v);
@@ -235,12 +252,16 @@ export function validateLabCandidatesDraft(
       }
     } else if (typeof row.reference_c === 'string' && row.reference_c.trim().length > 0) {
       refMap.set('c', row.reference_c);
+    } else if (typeof row.reference === 'string' && row.reference.trim().length > 0) {
+      const firstLang = requiredLangs[0] ?? 'c';
+      refMap.set(firstLang, row.reference);
     }
 
     const langsToCheck = requiredLangs.length > 0 ? requiredLangs : (['c'] as const);
-    const hasAtLeastOne = langsToCheck.some((lang) => refMap.has(lang)) || refMap.size > 0;
-    if (!hasAtLeastOne) {
-      throw new Error('invalid_ai_shape');
+    for (const lang of langsToCheck) {
+      if (!refMap.has(lang)) {
+        throw new Error('invalid_ai_shape');
+      }
     }
 
     const refs = Object.fromEntries(refMap.entries()) as Partial<Record<AllowedLang, string>>;
