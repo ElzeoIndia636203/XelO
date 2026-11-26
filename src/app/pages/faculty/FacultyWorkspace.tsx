@@ -32,6 +32,7 @@ import { FacultyShell } from './FacultyShell';
 import { LabQuestionsStep } from './LabQuestionsStep';
 import { ReportsStep } from './ReportsStep';
 import { AssessmentsStep } from './AssessmentsStep';
+import { InstantTestStep } from './InstantTestStep';
 import { SessionPlanStep } from './SessionPlanStep';
 import { SessionsStep } from './SessionsStep';
 import { TestBanksStep } from './TestBanksStep';
@@ -44,6 +45,7 @@ const VALID_STEPS: readonly FacultyStepId[] = [
   'banks',
   'sessions',
   'classroom',
+  'instant',
   'assessments',
   'reports',
 ];
@@ -386,6 +388,14 @@ export function FacultyWorkspace() {
           course={data.course}
           onNotify={(text, ok) => setNotice({ text, ok })}
           onRefresh={reload}
+        />
+      ) : null}
+
+      {activeStep === 'instant' ? (
+        <InstantTestStep
+          course={data.course}
+          outcomes={data.outcomes}
+          onNotify={(text, ok) => setNotice({ text, ok })}
         />
       ) : null}
 

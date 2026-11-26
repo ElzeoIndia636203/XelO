@@ -56,6 +56,11 @@ const STEP_META: Record<FacultyStepId, { kicker: string; title: string; lead: st
     title: 'Classroom',
     lead: 'Timeline shared with onboarded students. Add tasks, resources and announcements in place.',
   },
+  instant: {
+    kicker: 'Instant coding test',
+    title: 'Instant coding test',
+    lead: 'Create a quick coding assessment with topic, marks, CO mapping, visible/hidden tests, and a student join code.',
+  },
   assessments: {
     kicker: 'Step 8 · Run',
     title: 'Assessments',
@@ -177,8 +182,17 @@ export function FacultyShell({
       meta: batches.length > 0 ? `${batches.length} batches` : 'locked',
     },
     {
-      id: 'assessments',
+      id: 'instant',
       num: 8,
+      label: 'Instant coding test',
+      phase: 'Run',
+      done: false,
+      locked: false,
+      meta: 'code',
+    },
+    {
+      id: 'assessments',
+      num: 9,
       label: 'Assessments',
       phase: 'Run',
       done: false,
@@ -187,7 +201,7 @@ export function FacultyShell({
     },
     {
       id: 'reports',
-      num: 9,
+      num: 10,
       label: 'Reports',
       phase: 'Complete',
       done: false,

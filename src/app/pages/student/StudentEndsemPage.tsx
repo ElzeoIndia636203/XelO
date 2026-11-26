@@ -58,6 +58,76 @@ export function StudentEndsemPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [course, setCourse] = useState<CourseSummary | null>(null);
+  const [instantCode, setInstantCode] = useState('');
+  const [instantPrn, setInstantPrn] = useState('');
+  const [instantName, setInstantName] = useState('');
+  const [instantBusy, setInstantBusy] = useState(false);
+  const [instantErr, setInstantErr] = useState('');
+
+  async function joinInstantTest(e: React.FormEvent) {
+    e.preventDefault();
+    if (!instantCode.trim() || !instantPrn.trim() || !instantName.trim()) {
+      setInstantErr('Enter the test code, your PRN, and your full name.');
+      return;
+    }
+    setInstantBusy(true);
+    setInstantErr('');
+    const { data, error } = await supabase.rpc('student_join_instant_test', {
+      p_code: instantCode.trim().toUpperCase(),
+      p_prn: instantPrn.trim(),
+      p_name: instantName.trim(),
+    });
+    setInstantBusy(false);
+    if (error || !data) {
+      setInstantErr(errorMessage(error?.message ?? 'not_found'));
+      return;
+    }
+    const res = data as { attempt_id: string };
+    navigate(`/student/instant-test/${res.attempt_id}`);
+  }
+
+  const instantJoinCard = (
+    <Card title="Attend instant coding test">
+      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+        Enter the 6-character test code shared by your faculty along with your PRN and full name.
+      </p>
+      {instantErr && <ErrorNote message={instantErr} />}
+      <form onSubmit={joinInstantTest} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+        <label className="field-label">
+          Test code
+          <input
+            className="field mono"
+            value={instantCode}
+            onChange={(e) => setInstantCode(e.target.value.toUpperCase())}
+            placeholder="e.g. K7P9M2"
+            style={{ width: 130 }}
+          />
+        </label>
+        <label className="field-label">
+          PRN
+          <input
+            className="field mono"
+            value={instantPrn}
+            onChange={(e) => setInstantPrn(e.target.value)}
+            placeholder="e.g. 2301044"
+            style={{ width: 160 }}
+          />
+        </label>
+        <label className="field-label" style={{ flex: '1 1 220px' }}>
+          Full name
+          <input
+            className="field"
+            value={instantName}
+            onChange={(e) => setInstantName(e.target.value)}
+            placeholder="Your full name"
+          />
+        </label>
+        <button type="submit" className="btn btn-primary" disabled={instantBusy}>
+          {instantBusy ? 'Opening…' : 'Start coding test'}
+        </button>
+      </form>
+    </Card>
+  );
   const [assessment, setAssessment] = useState<StudentAssessmentRow | null>(null);
   const [paper, setPaper] = useState<ExamPaperSummary | null>(null);
   const [attPct, setAttPct] = useState(100);
@@ -250,8 +320,11 @@ export function StudentEndsemPage() {
   if (!assessment || !course) {
     return (
       <StudentShell activeTab="endsem">
-        <PageHead kicker="PRACTICAL EXAMINATION" title="End-sem practical" />
-        <Empty title="No end-sem practical scheduled" body="Your batch assessment will appear here once scheduled by faculty." />
+        <PageHead kicker="ASSESSMENT" title="Assessments" />
+        {instantJoinCard}
+        <div style={{ marginTop: 14 }}>
+          <Empty title="No end-sem practical scheduled" body="Your batch end-sem assessment will appear here once scheduled by faculty." />
+        </div>
       </StudentShell>
     );
   }

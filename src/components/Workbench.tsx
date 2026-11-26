@@ -62,7 +62,7 @@ export function Workbench({
   onExit,
 }: {
   mode: 'lab' | 'preview';
-  runContext?: 'lab' | 'exam';
+  runContext?: 'lab' | 'exam' | 'instant';
   paperId?: string;
   title: string;
   allowedLangs: readonly string[];

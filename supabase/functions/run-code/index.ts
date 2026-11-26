@@ -10,11 +10,11 @@ import {
 import { resolveLanguageIds, runOnJudge0 } from '../_shared/judge0.ts';
 
 const BodySchema = z.object({
-  question_id: z.string().uuid(),
+  question_id: z.string().min(1).max(100),
   lang: z.enum(['c', 'cpp', 'java', 'python', 'rust', 'go']),
   code: z.string().min(1).max(50_000),
   mode: z.enum(['run', 'submit']),
-  context: z.enum(['lab', 'exam']),
+  context: z.enum(['lab', 'exam', 'instant']),
   paper_id: z.string().uuid().nullable().optional(),
 });
 
@@ -38,13 +38,6 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'invalid_input' }, 400, origin);
   }
 
-  let input;
-  try {
-    input = parseRunRequest(zodRes.data);
-  } catch {
-    return json({ error: 'invalid_input' }, 400, origin);
-  }
-
   const uClient = userClient(authHeader);
   const { data: authData, error: authErr } = await uClient.auth.getUser();
   if (authErr || !authData.user) {
@@ -52,6 +45,126 @@ Deno.serve(async (req: Request) => {
   }
 
   const admin = adminClient();
+
+  if (zodRes.data.context === 'instant') {
+    const attemptId = zodRes.data.paper_id;
+    if (!attemptId) {
+      return json({ error: 'invalid_input' }, 400, origin);
+    }
+    const { data: attempt } = await admin
+      .from('instant_test_attempts')
+      .select('id, test_id, student_id, answers, submitted_at')
+      .eq('id', attemptId)
+      .single();
+    if (!attempt || attempt.student_id !== authData.user.id) {
+      return json({ error: 'forbidden' }, 403, origin);
+    }
+    if (attempt.submitted_at) {
+      return json({ error: 'already_submitted' }, 409, origin);
+    }
+
+    const { data: testRow } = await admin
+      .from('instant_tests')
+      .select('id, allowed_langs, visible_marks, hidden_marks, questions, active')
+      .eq('id', attempt.test_id)
+      .single();
+    if (!testRow || !testRow.active) {
+      return json({ error: 'not_found' }, 404, origin);
+    }
+    if (!(testRow.allowed_langs as string[]).includes(zodRes.data.lang)) {
+      return json({ error: 'unsupported_language' }, 400, origin);
+    }
+
+    const qList = (testRow.questions ?? []) as Array<{
+      id: string;
+      marks?: number;
+      visible_marks?: number;
+      hidden_marks?: number;
+      visible_tests?: Array<{ input: string; expected: string }>;
+      hidden_tests?: Array<{ input: string; expected: string }>;
+    }>;
+    const q = qList.find((item) => item.id === zodRes.data.question_id);
+    if (!q) {
+      return json({ error: 'not_found' }, 404, origin);
+    }
+
+    const judgeUrl = Deno.env.get('JUDGE0_URL');
+    if (!judgeUrl) {
+      return json({ error: 'runner_not_configured' }, 503, origin);
+    }
+    const cfg = {
+      baseUrl: judgeUrl,
+      apiKey: Deno.env.get('JUDGE0_API_KEY') ?? undefined,
+      authHeader: Deno.env.get('JUDGE0_AUTH_HEADER') ?? 'X-Auth-Token',
+      langIds: resolveLanguageIds(Deno.env.get('JUDGE0_LANG_IDS')),
+    };
+
+    const visSpecs: TestCaseSpec[] = (q.visible_tests ?? []).map((t, i) => ({
+      ord: i + 1,
+      input: t.input,
+      expected: t.expected,
+    }));
+    const hidSpecs: TestCaseSpec[] = (q.hidden_tests ?? []).map((t, i) => ({
+      ord: i + 1,
+      input: t.input,
+      expected: t.expected,
+    }));
+
+    const visibleOutcomes: ExecutedTestOutcome[] = [];
+    for (const tc of visSpecs) {
+      visibleOutcomes.push(await runOnJudge0(cfg, zodRes.data.lang, zodRes.data.code, tc));
+    }
+    const hiddenOutcomes: ExecutedTestOutcome[] = [];
+    if (zodRes.data.mode === 'submit') {
+      for (const tc of hidSpecs) {
+        hiddenOutcomes.push(await runOnJudge0(cfg, zodRes.data.lang, zodRes.data.code, tc));
+      }
+    }
+
+    const result = toResult(zodRes.data.mode, visibleOutcomes, hiddenOutcomes, hidSpecs.length);
+
+    if (zodRes.data.mode === 'submit') {
+      const visPassed = visibleOutcomes.filter((o) => o.passed).length;
+      const hidPassed = hiddenOutcomes.filter((o) => o.passed).length;
+      const visPool = Number(q.visible_marks ?? testRow.visible_marks ?? 0);
+      const hidPool = Number(q.hidden_marks ?? testRow.hidden_marks ?? 0);
+      const visEarned = visSpecs.length > 0 ? (visPassed / visSpecs.length) * visPool : 0;
+      const hidEarned = hidSpecs.length > 0 ? (hidPassed / hidSpecs.length) * hidPool : 0;
+      const qMarksCap = Number(q.marks ?? visPool + hidPool);
+      const marksAwarded = Math.min(qMarksCap, Number((visEarned + hidEarned).toFixed(2)));
+
+      const prevAnswers = ((attempt.answers ?? {}) as Record<string, { marks_awarded?: number }>);
+      const nextAnswers = {
+        ...prevAnswers,
+        [q.id]: {
+          lang: zodRes.data.lang,
+          code: zodRes.data.code,
+          visible_passed: visPassed,
+          visible_total: visSpecs.length,
+          hidden_passed: hidPassed,
+          hidden_total: hidSpecs.length,
+          marks_awarded: marksAwarded,
+        },
+      };
+      const totalScore = Object.values(nextAnswers).reduce(
+        (sum, a) => sum + Number(a.marks_awarded ?? 0),
+        0,
+      );
+      await admin
+        .from('instant_test_attempts')
+        .update({ answers: nextAnswers, total_score: Number(totalScore.toFixed(2)) })
+        .eq('id', attempt.id);
+    }
+
+    return json(result, 200, origin);
+  }
+
+  let input;
+  try {
+    input = parseRunRequest(zodRes.data as { question_id: string; lang: 'c' | 'cpp' | 'java' | 'python' | 'rust' | 'go'; code: string; mode: 'run' | 'submit'; context: 'lab' | 'exam'; paper_id?: string | null });
+  } catch {
+    return json({ error: 'invalid_input' }, 400, origin);
+  }
 
   const sinceIso = new Date(Date.now() - RATE_WINDOW_MS).toISOString();
   const { count: recentCount } = await admin

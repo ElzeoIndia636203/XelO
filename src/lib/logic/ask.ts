@@ -6,6 +6,7 @@ export type FacultyStepId =
   | 'banks'
   | 'sessions'
   | 'classroom'
+  | 'instant'
   | 'assessments'
   | 'reports';
 
@@ -18,6 +19,7 @@ export interface AskResult {
 }
 
 const ROUTES: Array<{ keys: readonly string[]; step: FacultyStepId; reply: string; reportTab?: 'file' | 'internal' | 'student' }> = [
+  { keys: ['instant', 'quick test', 'coding test'], step: 'instant', reply: 'Opened instant coding tests.' },
   { keys: ['end-sem', 'endsem', 'assessment', 'exam'], step: 'assessments', reply: 'Opened assessments.' },
   { keys: ['today', 'attendance', 'monitor', 'live'], step: 'sessions', reply: 'Opened sessions monitor.' },
   { keys: ['quiz', 'task', 'announce', 'resource', 'class', 'timeline'], step: 'classroom', reply: 'Opened classroom timeline.' },

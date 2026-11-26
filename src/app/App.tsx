@@ -84,6 +84,11 @@ const StudentLabFile = lazyRetry(() =>
     default: m.StudentLabFilePage,
   })),
 );
+const StudentInstantTest = lazyRetry(() =>
+  import('./pages/student/StudentInstantTestPage').then((m) => ({
+    default: m.StudentInstantTestPage,
+  })),
+);
 const FacultyStudentLabFile = lazyRetry(() =>
   import('./pages/student/StudentLabFilePage').then((m) => ({
     default: m.FacultyStudentLabFilePage,
@@ -291,6 +296,16 @@ const router = createBrowserRouter(
         <RequireRole allow={['student']}>
           <LazyWrap>
             <StudentProctoredIde />
+          </LazyWrap>
+        </RequireRole>
+      ),
+    },
+    {
+      path: '/student/instant-test/:attemptId',
+      element: (
+        <RequireRole allow={['student']}>
+          <LazyWrap>
+            <StudentInstantTest />
           </LazyWrap>
         </RequireRole>
       ),
