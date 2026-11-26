@@ -385,7 +385,7 @@ export function InteractiveAcademicCalendar({
           { label: 'Academic event', bg: '#E0F2FE', border: '#0284C7', color: '#0369A1' },
           { label: 'No-attendance', bg: '#FFEDD5', border: '#EA580C', color: '#C2410C' },
           { label: 'Approved meeting', bg: '#CCFBF1', border: '#0D9488', color: '#0F766E' },
-          { label: 'Busy', bg: '#FEF9C3', border: '#CA8A04', color: '#854D0E' },
+          { label: 'Busy / Blocked', bg: '#FEE2E2', border: '#DC2626', color: '#B91C1C' },
           { label: 'Sat off / Sun', bg: '#EEF2FF', border: '#C7D2FE', color: '#4338CA' },
         ].map((item) => (
           <span
@@ -436,7 +436,7 @@ export function InteractiveAcademicCalendar({
           const hasAcademicEv = cellEvents.some((e) => e.kind === 'academic_event');
           const cellBg =
             cellBusy
-              ? '#FEF9C3'
+              ? '#FEE2E2'
               : cellMeetings.length > 0
                 ? '#CCFBF1'
               : hasNoAtt
@@ -460,7 +460,9 @@ export function InteractiveAcademicCalendar({
                                 : '#FAFAF8';
           const cellBorder = isSelected
             ? '2px solid #0F766E'
-            : cellMeetings.length > 0
+            : cellBusy
+              ? '1.5px solid #DC2626'
+              : cellMeetings.length > 0
               ? '1px solid #0D9488'
               : hasNoAtt
                 ? '1px solid #EA580C'
@@ -533,8 +535,8 @@ export function InteractiveAcademicCalendar({
                 </span>
               ))}
               {cellBusy && (
-                <span style={{ fontSize: 10, color: '#854D0E', fontWeight: 700, overflowWrap: 'anywhere' }}>
-                  Busy: {cellBusy.reason}
+                <span style={{ fontSize: 10, color: '#B91C1C', fontWeight: 700, overflowWrap: 'anywhere' }}>
+                  Blocked: {cellBusy.reason}
                 </span>
               )}
             </button>
@@ -598,10 +600,10 @@ export function InteractiveAcademicCalendar({
           )}
 
           {canBlockBusy && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: 8, borderRadius: 6, background: '#FEF9C3', border: '1px solid #CA8A04' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: 8, borderRadius: 6, background: '#FEE2E2', border: '1px solid #DC2626' }}>
               {selectedDayBusy ? (
                 <>
-                  <span style={{ fontSize: 12, color: '#854D0E', fontWeight: 600 }}>
+                  <span style={{ fontSize: 12, color: '#B91C1C', fontWeight: 600 }}>
                     You blocked {selectedDay} as Busy ({selectedDayBusy.reason}) — incoming meeting requests are blocked.
                   </span>
                   <button type="button" className="btn field-sm" disabled={busy} onClick={() => void toggleBusyForSelectedDay()}>
