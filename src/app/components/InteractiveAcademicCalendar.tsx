@@ -109,6 +109,8 @@ export function InteractiveAcademicCalendar({
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [myBusyDays, setMyBusyDays] = useState<BusyDayItem[]>([]);
   const [recipientBusyDays, setRecipientBusyDays] = useState<BusyDayItem[]>([]);
+  const [recipientSessionEvents, setRecipientSessionEvents] = useState<CalendarOverlayEvent[]>([]);
+  const [recipientMeetings, setRecipientMeetings] = useState<CalendarMeetingItem[]>([]);
   const [facultySessionEvents, setFacultySessionEvents] = useState<CalendarOverlayEvent[]>([]);
   const [loadedCal, setLoadedCal] = useState<{
     first_working_day?: string;
@@ -130,8 +132,6 @@ export function InteractiveAcademicCalendar({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
-  const baseEvents = eventsProp ?? loadedCal?.events ?? [];
-  const events = facultySessionEvents.length > 0 ? [...baseEvents, ...facultySessionEvents] : baseEvents;
   const firstWorkingDay = firstWorkingDayProp ?? loadedCal?.first_working_day;
   const lastWorkingDay = lastWorkingDayProp ?? loadedCal?.last_working_day;
   const expectedEndsemDate = expectedEndsemDateProp ?? loadedCal?.expected_endsem_date ?? undefined;
@@ -147,6 +147,14 @@ export function InteractiveAcademicCalendar({
       : actionMode !== 'meeting_request' && !hasSubordinates && hasSuperiors
         ? 'meeting_request'
         : actionMode;
+  const baseEvents = eventsProp ?? loadedCal?.events ?? [];
+  const syncedExtraEvents =
+    facultySessionEvents.length > 0
+      ? facultySessionEvents
+      : effectiveMode === 'meeting_request'
+        ? recipientSessionEvents
+        : [];
+  const events = syncedExtraEvents.length > 0 ? [...baseEvents, ...syncedExtraEvents] : baseEvents;
   const filteredContacts = contacts.filter((c) =>
     effectiveMode === 'meeting_request' ? c.relation === 'superior' : c.relation === 'subordinate',
   );
@@ -245,20 +253,42 @@ export function InteractiveAcademicCalendar({
 
   useEffect(() => {
     let cancelled = false;
-    if (effectiveMode !== 'meeting_request' || !activeRecipient) {
+    if (effectiveMode !== 'meeting_request' || !activeRecipient || viewUserId) {
       return;
     }
-    void supabase
-      .rpc('list_busy_days', { p_user_id: activeRecipient })
-      .then(({ data }) => {
-        if (!cancelled && Array.isArray(data)) {
-          setRecipientBusyDays(data as BusyDayItem[]);
-        }
-      });
+    void Promise.all([
+      supabase.rpc('list_busy_days', { p_user_id: activeRecipient }),
+      supabase.rpc('faculty_calendar_sessions', { p_user_id: activeRecipient }),
+      supabase.rpc('calendar_approved_meetings', { p_user_id: activeRecipient }),
+    ]).then(([bRes, sRes, mRes]) => {
+      if (cancelled) return;
+      if (Array.isArray(bRes.data)) {
+        setRecipientBusyDays(bRes.data as BusyDayItem[]);
+      }
+      if (Array.isArray(sRes.data)) {
+        setRecipientSessionEvents(
+          (sRes.data as Array<{ course_code: string; session_n: number; session_title: string; scheduled_date: string }>).map(
+            (s) => ({
+              day: s.scheduled_date,
+              kind: 'academic_event',
+              event_type: 'Lab',
+              label: `${s.course_code} S${s.session_n}: ${s.session_title}`,
+            }),
+          ),
+        );
+      } else {
+        setRecipientSessionEvents([]);
+      }
+      if (Array.isArray(mRes.data)) {
+        setRecipientMeetings(mRes.data as CalendarMeetingItem[]);
+      } else {
+        setRecipientMeetings([]);
+      }
+    });
     return () => {
       cancelled = true;
     };
-  }, [effectiveMode, activeRecipient]);
+  }, [effectiveMode, activeRecipient, viewUserId]);
 
   async function toggleBusyForSelectedDay() {
     if (!selectedDay) return;
@@ -417,9 +447,22 @@ export function InteractiveAcademicCalendar({
           if (!iso) {
             return <div key={`e-${idx}`} style={{ minHeight: 68, borderRadius: 6, background: 'rgba(0,0,0,0.02)' }} />;
           }
-          const cellMeetings = meetings.filter((m) => m.scheduled_at.slice(0, 10) === iso);
+          const cellMeetings = [
+            ...meetings.filter((m) => m.scheduled_at.slice(0, 10) === iso),
+            ...(effectiveMode === 'meeting_request' && !viewUserId
+              ? recipientMeetings.filter(
+                  (rm) =>
+                    rm.scheduled_at.slice(0, 10) === iso &&
+                    !meetings.some((m) => m.id === rm.id),
+                )
+              : []),
+          ];
           const cellEvents = events.filter((ev) => ev.day === iso);
           const cellBusy = myBusyDays.find((b) => b.day === iso);
+          const cellRecBusy =
+            effectiveMode === 'meeting_request' && !viewUserId
+              ? recipientBusyDays.find((b) => b.day === iso)
+              : undefined;
           const isSelected = selectedDay === iso;
           const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
           const isSunday = dow === 0;
@@ -435,7 +478,7 @@ export function InteractiveAcademicCalendar({
           );
           const hasAcademicEv = cellEvents.some((e) => e.kind === 'academic_event');
           const cellBg =
-            cellBusy
+            cellBusy || cellRecBusy
               ? '#FEE2E2'
               : cellMeetings.length > 0
                 ? '#CCFBF1'
@@ -460,7 +503,7 @@ export function InteractiveAcademicCalendar({
                                 : '#FAFAF8';
           const cellBorder = isSelected
             ? '2px solid #0F766E'
-            : cellBusy
+            : cellBusy || cellRecBusy
               ? '1.5px solid #DC2626'
               : cellMeetings.length > 0
               ? '1px solid #0D9488'
@@ -537,6 +580,11 @@ export function InteractiveAcademicCalendar({
               {cellBusy && (
                 <span style={{ fontSize: 10, color: '#B91C1C', fontWeight: 700, overflowWrap: 'anywhere' }}>
                   Blocked: {cellBusy.reason}
+                </span>
+              )}
+              {!cellBusy && cellRecBusy && (
+                <span style={{ fontSize: 10, color: '#B91C1C', fontWeight: 700, overflowWrap: 'anywhere' }}>
+                  Recipient busy: {cellRecBusy.reason}
                 </span>
               )}
             </button>
