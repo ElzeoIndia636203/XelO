@@ -50,6 +50,8 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  max-width: 100%;
 }
 
 h1,
@@ -564,13 +566,19 @@ th {
 
 .console-topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 10px 12px;
   padding: 10px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   font-size: 13px;
+}
+
+.console-mobile-menu-btn {
+  display: none;
+  margin-right: auto;
 }
 
 .console-main {
@@ -613,8 +621,27 @@ th {
 }
 
 @media (max-width: 720px) {
+  .console-mobile-menu-btn {
+    display: inline-flex;
+  }
+
   .console-rail {
     max-width: none;
+    width: 100%;
+    padding: 14px;
+  }
+
+  .console-rail[data-mobile-open='false'] .console-nav,
+  .console-rail[data-mobile-open='false'] .console-rail-footer {
+    display: none;
+  }
+
+  .console-topbar {
+    padding: 10px 14px;
+  }
+
+  .console-main {
+    padding: 14px;
   }
 
   .timeline-row {

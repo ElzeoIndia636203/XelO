@@ -1,9 +1,9 @@
 /* XeIO landing: editorial layout (FLYY4 patterns) in the XeIO palette. Blue marks the path and the one action. */
 :root { --ink: #141413; --paper: #f4f3ef; --muted: #5f5e58; --line: #d9d6cc; --blue: #1f5fe0; --blue-d: #3fa9f5; --serif: 'IBM Plex Serif', Georgia, serif; --sans: 'IBM Plex Sans', system-ui, sans-serif; }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; overflow-x: hidden; max-width: 100%; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-body { margin: 0; background: var(--paper); color: var(--ink); font: 18px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 18px/1.6 var(--sans); -webkit-font-smoothing: antialiased; overflow-x: hidden; max-width: 100%; }
 a { color: inherit; }
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .skip { position: absolute; left: -999px; } .skip:focus { left: 16px; top: 16px; background: #fff; padding: 8px 12px; z-index: 9; }
@@ -18,11 +18,16 @@ p { max-width: 62ch; }
 .go:hover { background: #164bb8; }
 .plain { text-decoration: underline; text-underline-offset: 4px; font-size: 16px; margin-left: 20px; }
 
-.top { display: flex; align-items: center; justify-content: space-between; padding: 22px clamp(20px, 5vw, 72px); }
+.top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 22px clamp(20px, 5vw, 72px); }
 .top nav { display: flex; gap: 26px; align-items: center; font-size: 15px; }
 .top nav a:not(.go) { text-decoration: none; }
 .top nav a:not(.go):hover { text-decoration: underline; text-underline-offset: 4px; }
-@media (max-width: 760px) { .top nav a:not(.go) { display: none; } }
+.menu-toggle { display: none; background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font: 600 14px var(--sans); color: var(--ink); cursor: pointer; }
+@media (max-width: 760px) {
+  .menu-toggle { display: inline-flex; align-items: center; }
+  .top nav { display: none; width: 100%; flex-direction: column; align-items: flex-start; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .top nav.open { display: flex; }
+}
 
 main > section { padding: clamp(56px, 9vw, 120px) clamp(20px, 5vw, 72px); }
 .hero { display: grid; grid-template-columns: repeat(12, 1fr); gap: 24px; align-items: center; padding-top: 40px !important; }
@@ -74,6 +79,8 @@ main > section { padding: clamp(56px, 9vw, 120px) clamp(20px, 5vw, 72px); }
 @media (max-width: 960px) { .faq { margin-left: 0; } }
 
 .foot { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; padding: 48px clamp(20px, 5vw, 72px); border-top: 1px solid var(--line); background: #fff; }
-.foot img { width: 200px; height: auto; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 14px; font-size: 14px; margin: 10px 0 0; }
+.foot-links a { text-decoration: underline; text-underline-offset: 3px; color: var(--muted); }
+.foot img { width: 200px; height: auto; max-width: 100%; }
 .foot .small { grid-column: 1 / -1; font-size: 13px; color: var(--muted); margin: 0; }
 @media (max-width: 640px) { .foot { grid-template-columns: 1fr; } }

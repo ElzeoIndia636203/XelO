@@ -35,7 +35,8 @@
     <a class="skip" href="#main">Skip to content</a>
     <header class="top">
       <a href="/" class="mark" aria-label="XeIO home">Xe<span>IO</span></a>
-      <nav aria-label="Main">
+      <button type="button" class="menu-toggle" id="menu-toggle" aria-expanded="false" aria-controls="main-nav">Menu</button>
+      <nav id="main-nav" aria-label="Main">
         <a href="#journey">How it works</a>
         <a href="#faculty">Faculty</a>
         <a href="#students">Students</a>
@@ -120,8 +121,16 @@
 
     <footer class="foot">
       <div>
-        <span class="mark">Xe<span>IO</span></span>
+        <a href="/" class="mark" aria-label="XeIO home">Xe<span>IO</span></a>
         <p>Designed and maintained by Elzeo Future Technologies Pvt Ltd, India.</p>
+        <p class="foot-links">
+          <a href="#journey">How it works</a>
+          <a href="#faculty">Faculty</a>
+          <a href="#students">Students</a>
+          <a href="#integrity">Integrity</a>
+          <a href="/app/login">Sign in</a>
+          <a href="mailto:support@elzeo.in">support@elzeo.in</a>
+        </p>
       </div>
       <img src="/brand/elzeo-full-light.png" width="300" height="136" alt="Elzeo · Innovate | Transform" loading="lazy" />
       <p class="small">© <span id="y">2026</span> Elzeo Future Technologies Pvt Ltd. XeIO is a product of Elzeo.</p>
