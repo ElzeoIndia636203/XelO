@@ -7,6 +7,7 @@ import { useLoad } from '../../../lib/hooks';
 import type { SupportedLang } from '../../../lib/logic/starters';
 import { useSession } from '../../../lib/session';
 import { fetchAll, rpc, supabase } from '../../../lib/supabase';
+import { useTabLock } from '../../../lib/useTabLock';
 import type {
   Course,
   DraftRow,
@@ -25,6 +26,7 @@ export function StudentLabPage() {
   const navigate = useNavigate();
   const { profile } = useSession();
   const [liveHints, setLiveHints] = useState<NotificationRow[]>([]);
+  const { duplicateTabOpen, takeOverTab } = useTabLock(`lab:${paramSessionId || 'active'}`);
 
   const { data, loading, error, reload } = useLoad(async () => {
     const uid = profile?.id ?? '';
@@ -183,28 +185,52 @@ export function StudentLabPage() {
   );
 
   return (
-    <Workbench
-      mode="lab"
-      title={`${data.course.code} · S${data.session.n} ${data.session.topic}`}
-      allowedLangs={data.course.allowed_langs}
-      questions={data.workbenchQuestions}
-      initialDrafts={data.draftMap}
-      initialSubmissions={data.submissions}
-      preAttempt={data.preAttempt}
-      postAttempt={data.postAttempt}
-      hints={combinedHints}
-      sessionEndsLabel="Closes 23:59"
-      onSaveDraft={async (questionId, lang: SupportedLang, code) => {
-        await rpc('save_draft', {
-          p_question_id: questionId,
-          p_context: 'lab',
-          p_lang: lang,
-          p_code: code,
-        });
-      }}
-      onRunCompleted={reload}
-      onOpenPostTest={() => navigate(`/student/test/${data.session.id}/post`)}
-      onExit={() => navigate('/student')}
-    />
+    <>
+      {duplicateTabOpen ? (
+        <div
+          role="alert"
+          style={{
+            background: '#FEF3C7',
+            color: '#92400E',
+            padding: '8px 16px',
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            borderBottom: '1px solid #F59E0B',
+          }}
+        >
+          <span>This lab is already open in another tab. Autosave is paused here to prevent overwriting your work.</span>
+          <button type="button" className="btn field-sm" onClick={takeOverTab}>
+            Use this tab
+          </button>
+        </div>
+      ) : null}
+      <Workbench
+        mode="lab"
+        title={`${data.course.code} · S${data.session.n} ${data.session.topic}`}
+        allowedLangs={data.course.allowed_langs}
+        questions={data.workbenchQuestions}
+        initialDrafts={data.draftMap}
+        initialSubmissions={data.submissions}
+        preAttempt={data.preAttempt}
+        postAttempt={data.postAttempt}
+        hints={combinedHints}
+        sessionEndsLabel="Closes 23:59"
+        onSaveDraft={async (questionId, lang: SupportedLang, code) => {
+          if (duplicateTabOpen) return;
+          await rpc('save_draft', {
+            p_question_id: questionId,
+            p_context: 'lab',
+            p_lang: lang,
+            p_code: code,
+          });
+        }}
+        onRunCompleted={reload}
+        onOpenPostTest={() => navigate(`/student/test/${data.session.id}/post`)}
+        onExit={() => navigate('/student')}
+      />
+    </>
   );
 }

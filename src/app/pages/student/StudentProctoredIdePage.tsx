@@ -19,6 +19,7 @@ import {
 } from '../../../lib/proctor-runtime';
 import { useSession } from '../../../lib/session';
 import { supabase } from '../../../lib/supabase';
+import { useTabLock } from '../../../lib/useTabLock';
 import type { Course, DraftRow, QuestionRow, SubmissionRow, TestCaseRow } from '../../../lib/types';
 
 interface PaperRow {
@@ -33,6 +34,7 @@ interface PaperRow {
 
 export function StudentProctoredIdePage() {
   const { paperId = '' } = useParams<{ paperId: string }>();
+  const { duplicateTabOpen, takeOverTab } = useTabLock(`exam:${paperId}`);
   const navigate = useNavigate();
   const { profile } = useSession();
 
@@ -319,6 +321,26 @@ export function StudentProctoredIdePage() {
         </button>
       </header>
 
+      {duplicateTabOpen && (
+        <div
+          role="alert"
+          style={{
+            background: '#FEF3C7',
+            color: '#92400E',
+            padding: '8px 16px',
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}
+        >
+          <span>This exam is already open in another tab. Autosave is paused here to prevent overwriting your code.</span>
+          <button type="button" className="btn field-sm" onClick={takeOverTab}>
+            Use this tab
+          </button>
+        </div>
+      )}
       {toast && (
         <div style={{ background: '#fef2f2', color: '#991b1b', padding: '8px 16px', fontSize: 13 }}>
           {toast}
@@ -336,6 +358,7 @@ export function StudentProctoredIdePage() {
           initialDrafts={draftMap}
           initialSubmissions={submissions}
           onSaveDraft={async (questionId, lang, code) => {
+            if (duplicateTabOpen) return;
             setSaveState('Saving…');
             await supabase.rpc('save_draft', {
               p_question_id: questionId,

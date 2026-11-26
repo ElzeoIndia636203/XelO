@@ -51,7 +51,7 @@ export function NotificationBell({ variant = 'light' }: { variant?: 'dark' | 'li
       .channel(`bell-notif-${profileId}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${profileId}` },
+        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${profileId}` },
         () => {
           void pullNotifications(profileId).then((rows) => {
             if (alive) setNotifications(rows);

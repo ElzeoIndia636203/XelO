@@ -29,6 +29,18 @@ const STUDENT_MAX_MS = 12 * 60 * 60 * 1000;
 const STAFF_IDLE_MS = 8 * 60 * 60 * 1000;
 const LOGIN_AT_KEY = 'xeio_login_at';
 const LAST_ACTIVE_KEY = 'xeio_last_active_at';
+const SESSION_USER_KEY = 'xeio_session_user';
+const TOUCH_THROTTLE_MS = 15_000;
+
+function clearSharedSessionTimers() {
+  try {
+    window.localStorage.removeItem(LOGIN_AT_KEY);
+    window.localStorage.removeItem(LAST_ACTIVE_KEY);
+    window.localStorage.removeItem(SESSION_USER_KEY);
+  } catch {
+    // Ignore storage errors in restricted contexts
+  }
+}
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -42,6 +54,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const seq = ++loadSeqRef.current;
 
     if (!nextSession) {
+      clearSharedSessionTimers();
       if (seq === loadSeqRef.current) {
         setSession(null);
         setProfile(null);
@@ -85,15 +98,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
 
       const now = Date.now();
-      const loginAtRaw = window.sessionStorage.getItem(LOGIN_AT_KEY);
-      const lastActiveRaw = window.sessionStorage.getItem(LAST_ACTIVE_KEY);
+      const storedUser = window.localStorage.getItem(SESSION_USER_KEY);
+      const isSameUser = storedUser === nextSession.user.id;
+      const loginAtRaw = isSameUser ? window.localStorage.getItem(LOGIN_AT_KEY) : null;
+      const lastActiveRaw = isSameUser ? window.localStorage.getItem(LAST_ACTIVE_KEY) : null;
       const loginAt = loginAtRaw ? Number(loginAtRaw) : now;
       const lastActive = lastActiveRaw ? Number(lastActiveRaw) : now;
 
-      if (!loginAtRaw) {
-        window.sessionStorage.setItem(LOGIN_AT_KEY, String(now));
+      if (!isSameUser || !loginAtRaw) {
+        window.localStorage.setItem(SESSION_USER_KEY, nextSession.user.id);
+        window.localStorage.setItem(LOGIN_AT_KEY, String(now));
       }
-      window.sessionStorage.setItem(LAST_ACTIVE_KEY, String(now));
+      window.localStorage.setItem(LAST_ACTIVE_KEY, String(isSameUser ? Math.max(lastActive, now) : now));
 
       const expired =
         prof.role === 'student'
@@ -101,8 +117,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           : now - lastActive > STAFF_IDLE_MS;
 
       if (expired) {
-        window.sessionStorage.removeItem(LOGIN_AT_KEY);
-        window.sessionStorage.removeItem(LAST_ACTIVE_KEY);
+        clearSharedSessionTimers();
         await supabase.auth.signOut();
         if (seq === loadSeqRef.current) {
           setSession(null);
@@ -166,8 +181,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!profile) return;
+    let lastWrite = 0;
     const touch = () => {
-      window.sessionStorage.setItem(LAST_ACTIVE_KEY, String(Date.now()));
+      const now = Date.now();
+      if (now - lastWrite < TOUCH_THROTTLE_MS) return;
+      lastWrite = now;
+      window.localStorage.setItem(LAST_ACTIVE_KEY, String(now));
     };
     window.addEventListener('pointerdown', touch, { passive: true });
     window.addEventListener('keydown', touch, { passive: true });
@@ -178,8 +197,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [profile]);
 
   const signOut = useCallback(async () => {
-    window.sessionStorage.removeItem(LOGIN_AT_KEY);
-    window.sessionStorage.removeItem(LAST_ACTIVE_KEY);
+    clearSharedSessionTimers();
     await supabase.auth.signOut();
     setSession(null);
     setProfile(null);

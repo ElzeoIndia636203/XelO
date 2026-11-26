@@ -348,6 +348,7 @@ export default function HodConsole() {
   const [editEvKind, setEditEvKind] = useState<CalendarEventKind>('internal_exam');
   const [editEvLabel, setEditEvLabel] = useState('');
   const [calBusy, setCalBusy] = useState(false);
+  const [calLoadedUpdatedAt, setCalLoadedUpdatedAt] = useState<string | null>(null);
   const calEventFormRef = useRef<HTMLFormElement | null>(null);
   const [facultyStats, setFacultyStats] = useState<FacultyCourseStatRow[]>([]);
   const [meetingTarget, setMeetingTarget] = useState<FacultyCourseStatRow | null>(null);
@@ -375,7 +376,7 @@ export default function HodConsole() {
         .order('code', { ascending: true }),
       supabase
         .from('academic_calendars')
-        .select('id, first_working_day, last_working_day, expected_endsem_date, saturday_rule, approved')
+        .select('id, first_working_day, last_working_day, expected_endsem_date, saturday_rule, approved, updated_at')
         .eq('department_id', profile.department_id)
         .maybeSingle(),
       supabase.rpc('hod_faculty_summary', { p_department_id: profile.department_id }),
@@ -404,8 +405,10 @@ export default function HodConsole() {
         expected_endsem_date: string | null;
         saturday_rule: SaturdayRule;
         approved: boolean;
+        updated_at?: string;
       };
       setCalId(typedCal.id);
+      setCalLoadedUpdatedAt(typedCal.updated_at ?? null);
       setCalFirstDay(typedCal.first_working_day);
       setCalLastDay(typedCal.last_working_day);
       setCalEndsemDate(typedCal.expected_endsem_date ?? '');
@@ -901,6 +904,22 @@ export default function HodConsole() {
     setErr('');
     setNotice('');
 
+    if (calId && calLoadedUpdatedAt) {
+      const { data: latestCal } = await supabase
+        .from('academic_calendars')
+        .select('updated_at')
+        .eq('id', calId)
+        .maybeSingle();
+      const latestAt = (latestCal as { updated_at?: string } | null)?.updated_at ?? null;
+      if (latestAt && latestAt !== calLoadedUpdatedAt) {
+        setCalBusy(false);
+        setErr('This calendar was updated in another tab. Reloading the latest calendar before saving.');
+        void loadDeptConfig();
+        return;
+      }
+    }
+
+    const nextUpdatedAt = new Date().toISOString();
     const payload = {
       institution_id: profile.institution_id,
       department_id: profile.department_id,
@@ -910,9 +929,9 @@ export default function HodConsole() {
       saturday_rule: calSatRule,
       approved: approve,
       approved_by: approve ? profile.id : null,
-      approved_at: approve ? new Date().toISOString() : null,
+      approved_at: approve ? nextUpdatedAt : null,
       created_by: profile.id,
-      updated_at: new Date().toISOString(),
+      updated_at: nextUpdatedAt,
     };
 
     const { data: savedCal, error: calErr } = await supabase
