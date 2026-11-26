@@ -77,6 +77,8 @@ export function LabQuestionsStep({
   const [uploadItems, setUploadItems] = useState<ParsedLabQuestion[]>([]);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const [previewItem, setPreviewItem] = useState<{ session: SessionRow; question: QuestionRow } | null>(null);
+  const [previewLang, setPreviewLang] = useState<string>('');
+  const [previewValMsg, setPreviewValMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   if (course.plan_status !== 'approved' || sessions.length === 0) {
     return (
@@ -114,8 +116,12 @@ export function LabQuestionsStep({
   }
 
   const refCountByQuestion = new Map<string, number>();
+  const refsByQuestion = new Map<string, ReferenceSolutionRow[]>();
   for (const r of references) {
     refCountByQuestion.set(r.question_id, (refCountByQuestion.get(r.question_id) ?? 0) + 1);
+    const list = refsByQuestion.get(r.question_id) ?? [];
+    list.push(r);
+    refsByQuestion.set(r.question_id, list);
   }
 
   const questionsForSession = (sessionId: string) =>
@@ -209,12 +215,27 @@ export function LabQuestionsStep({
 
   async function validateOne(qId: string) {
     setValidatingIds((prev) => ({ ...prev, [qId]: true }));
+    if (previewItem?.question.id === qId) {
+      setPreviewValMsg(null);
+    }
     try {
-      await fn('validate-question', { question_id: qId });
-      onNotify('Question validated against all enabled languages.', true);
+      const res = await fn<{ valid: boolean; validation_note: string }>('validate-question', {
+        question_id: qId,
+      });
+      const msg = res.valid
+        ? res.validation_note || 'Question validated against all enabled languages.'
+        : res.validation_note || 'Validation failed.';
+      if (previewItem?.question.id === qId) {
+        setPreviewValMsg({ text: msg, ok: res.valid });
+      }
+      onNotify(msg, res.valid);
       onRefresh();
     } catch (err) {
-      onNotify(errorMessage(err), false);
+      const msg = errorMessage(err);
+      if (previewItem?.question.id === qId) {
+        setPreviewValMsg({ text: msg, ok: false });
+      }
+      onNotify(msg, false);
     } finally {
       setValidatingIds((prev) => ({ ...prev, [qId]: false }));
     }
@@ -490,7 +511,17 @@ export function LabQuestionsStep({
                           ) : q.valid === true ? (
                             <Chip tone="good">Checks passed</Chip>
                           ) : q.valid === false ? (
-                            <Chip tone="bad">{q.validation_note || 'Validation failed · cannot select'}</Chip>
+                            <>
+                              <Chip tone="bad">{q.validation_note || 'Validation failed · cannot select'}</Chip>
+                              <button
+                                type="button"
+                                className="btn field-sm"
+                                disabled={busyKey !== null}
+                                onClick={() => void validateOne(q.id)}
+                              >
+                                Re-validate
+                              </button>
+                            </>
                           ) : (
                             <>
                               <Chip tone="warn">{q.validation_note || 'Needs validation'}</Chip>
@@ -519,7 +550,12 @@ export function LabQuestionsStep({
                           <button
                             type="button"
                             className="btn field-sm"
-                            onClick={() => setPreviewItem({ session: s, question: q })}
+                            onClick={() => {
+                              const qRefs = refsByQuestion.get(q.id) ?? [];
+                              setPreviewValMsg(null);
+                              setPreviewLang(qRefs[0]?.lang ?? '');
+                              setPreviewItem({ session: s, question: q });
+                            }}
                           >
                             Preview
                           </button>
@@ -852,6 +888,8 @@ export function LabQuestionsStep({
           const pTcs = tcByQuestion.get(pq.id) ?? [];
           const pVis = pTcs.filter((t) => !t.hidden);
           const pHid = pTcs.filter((t) => t.hidden);
+          const pRefs = refsByQuestion.get(pq.id) ?? [];
+          const activeRef = pRefs.find((r) => r.lang === previewLang) ?? pRefs[0] ?? null;
           const pSelected = getSelectedIds(ps.id).includes(pq.id);
           const pValid = pq.valid === true;
           return (
@@ -863,6 +901,11 @@ export function LabQuestionsStep({
                   {pValid ? 'Checks passed' : pq.valid === false ? 'Validation failed' : 'Needs validation'}
                 </Chip>
               </div>
+              {previewValMsg ? (
+                <Banner tone={previewValMsg.ok ? 'ok' : 'err'}>{previewValMsg.text}</Banner>
+              ) : pq.validation_note ? (
+                <Banner tone={pValid ? 'ok' : 'err'}>{pq.validation_note}</Banner>
+              ) : null}
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>Problem statement</div>
                 <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{pq.statement}</div>
@@ -897,6 +940,50 @@ export function LabQuestionsStep({
                     </div>
                   ))}
                 </div>
+              </div>
+              <div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>
+                    Reference solution code ({pRefs.length} language{pRefs.length === 1 ? '' : 's'})
+                  </div>
+                  {pRefs.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {pRefs.map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          className={activeRef?.lang === r.lang ? 'btn btn-primary field-sm' : 'btn field-sm'}
+                          onClick={() => setPreviewLang(r.lang)}
+                        >
+                          {r.lang}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                {activeRef ? (
+                  <pre
+                    className="mono"
+                    style={{
+                      margin: 0,
+                      padding: 10,
+                      borderRadius: 6,
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-subtle)',
+                      fontSize: 12,
+                      lineHeight: 1.45,
+                      overflowX: 'auto',
+                      maxHeight: 240,
+                      whiteSpace: 'pre',
+                    }}
+                  >
+                    {activeRef.code}
+                  </pre>
+                ) : (
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                    No reference solution code stored for this question yet.
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
                 {!pValid ? (

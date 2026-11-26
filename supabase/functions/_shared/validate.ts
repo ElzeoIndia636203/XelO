@@ -35,22 +35,29 @@ export async function validateQuestionWithRunner(params: {
       };
     }
 
-    for (const tc of params.tests) {
-      let outcome: ExecutedTestOutcome;
-      try {
-        outcome = await params.runTest(lang, code, tc);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'runner_error';
+    const outcomes = await Promise.all(
+      params.tests.map(async (tc) => {
+        try {
+          const outcome = await params.runTest(lang, code, tc);
+          return { tc, outcome, err: null as string | null };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'runner_error';
+          return { tc, outcome: null, err: msg };
+        }
+      }),
+    );
+
+    for (const item of outcomes) {
+      if (item.err !== null) {
         return {
           valid: false,
-          validation_note: `${lang} failed ${tc.hidden ? 'hidden ' : ''}case ${tc.ord}: ${msg}`,
+          validation_note: `${lang} failed ${item.tc.hidden ? 'hidden ' : ''}case ${item.tc.ord}: ${item.err}`,
         };
       }
-
-      if (!outcome.passed) {
+      if (!item.outcome || !item.outcome.passed) {
         return {
           valid: false,
-          validation_note: `${lang} failed ${tc.hidden ? 'hidden ' : ''}case ${tc.ord}: ${outcome.status}`,
+          validation_note: `${lang} failed ${item.tc.hidden ? 'hidden ' : ''}case ${item.tc.ord}: ${item.outcome?.status ?? 'wrong_answer'}`,
         };
       }
     }

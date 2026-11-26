@@ -92,13 +92,17 @@ Deno.serve(async (req: Request) => {
       ),
   });
 
+  const updatePatch: { valid: boolean; validation_note: string; status?: 'candidate' } = {
+    valid: result.valid,
+    validation_note: result.validation_note,
+  };
+  if (!result.valid) {
+    updatePatch.status = 'candidate';
+  }
+
   await admin
     .from('questions')
-    .update({
-      valid: result.valid,
-      validation_note: result.validation_note,
-      status: result.valid ? undefined : 'candidate',
-    })
+    .update(updatePatch)
     .eq('id', question.id);
 
   let sessionStatus: string | null = null;
