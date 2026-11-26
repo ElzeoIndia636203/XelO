@@ -162,7 +162,7 @@ interface RawHodCourse {
   final_status: string | null;
   plan_status: string | null;
   endsem_status: string | null;
-  batches: { name: string } | null;
+  batches: { name: string }[] | { name: string } | null;
   profiles: { full_name: string } | null;
   departments: { name: string } | null;
 }
@@ -176,14 +176,6 @@ interface CourseStatRow {
   completion_pct: number;
   at_risk: number;
   live_now: boolean;
-}
-
-interface RawHodNotification {
-  id: string;
-  kind: string;
-  entity_id: string;
-  created_at: string;
-  payload: { course_code?: string; course_title?: string } | null;
 }
 
 interface DeptOutcomeRow {
@@ -431,7 +423,8 @@ export default function HodConsole() {
     setErr('');
     void loadDeptConfig();
     // load courses this HOD oversees
-    const { data: rawCourses, error: ce } = await supabase
+    const instId = profile?.institution_id ?? (await supabase.rpc('my_institution')).data;
+    let coursesQuery = supabase
       .from('courses')
       .select(`
         id, code, title, final_status, plan_status, endsem_status,
@@ -439,7 +432,11 @@ export default function HodConsole() {
         profiles!courses_faculty_id_fkey(full_name),
         departments(name)
       `)
-      .eq('institution_id', (await supabase.rpc('my_institution')).data);
+      .eq('institution_id', instId);
+    if (hodDeptId) {
+      coursesQuery = coursesQuery.eq('department_id', hodDeptId);
+    }
+    const { data: rawCourses, error: ce } = await coursesQuery;
     if (ce) { setErr(errorMessage(ce.message)); setLoading(false); return; }
 
     const typedCourses = (rawCourses ?? []) as unknown as RawHodCourse[];
@@ -454,11 +451,14 @@ export default function HodConsole() {
 
     const merged: Course[] = typedCourses.map((c) => {
       const st = stats.find((s) => s.course_id === c.id);
+      const batchName = Array.isArray(c.batches)
+        ? c.batches.map((b) => b.name).join(', ')
+        : c.batches?.name ?? '';
       return {
         id: c.id,
         code: c.code,
         title: c.title,
-        batch_name: c.batches?.name ?? '',
+        batch_name: batchName,
         faculty_name: c.profiles?.full_name ?? '',
         department_name: c.departments?.name ?? '',
         final_status: c.final_status,
@@ -475,32 +475,10 @@ export default function HodConsole() {
     });
     setCourses(merged);
 
-    // load approvals (notifications of kind plan/final_marks pending action)
-    const { data: notifs, error: ne } = await supabase
-      .from('notifications')
-      .select('id, kind, entity_id, created_at, payload')
-      .eq('recipient_id', (await supabase.auth.getUser()).data.user?.id)
-      .in('kind', ['plan_pending', 'final_marks_pending'])
-      .order('created_at', { ascending: false });
-    if (ne) { setErr(errorMessage(ne.message)); setLoading(false); return; }
-
-    const now = Date.now();
-    const typedNotifs = (notifs ?? []) as unknown as RawHodNotification[];
-    const notifItems: ApprovalItem[] = typedNotifs.map((n) => ({
-      id: n.id,
-      kind: n.kind === 'plan_pending' ? 'Course plan' : 'Final marks',
-      course_code: n.payload?.course_code ?? '',
-      course_title: n.payload?.course_title ?? '',
-      what: n.kind === 'plan_pending' ? 'Awaiting HOD approval' : 'Awaiting HOD approval & CoE submission',
-      age_hours: (now - new Date(n.created_at).getTime()) / 3_600_000,
-      entity_id: n.entity_id,
-    }));
-
-    // Also include courses/assessments directly in pending state
-    const seen = new Set(notifItems.map((i) => `${i.kind}:${i.entity_id}`));
+    // Build pending approvals directly from courses & end-sem assessments
     const directItems: ApprovalItem[] = [];
     for (const c of merged) {
-      if (c.plan_status === 'sent' && !seen.has(`Course plan:${c.id}`)) {
+      if (c.plan_status === 'sent') {
         directItems.push({
           id: `plan-${c.id}`,
           kind: 'Course plan',
@@ -511,7 +489,7 @@ export default function HodConsole() {
           entity_id: c.id,
         });
       }
-      if (c.final_status === 'sent' && !seen.has(`Final marks:${c.id}`)) {
+      if (c.final_status === 'sent') {
         directItems.push({
           id: `final-${c.id}`,
           kind: 'Final marks',
@@ -531,7 +509,7 @@ export default function HodConsole() {
         .eq('hod_status', 'sent');
       for (const a of (pendingAssess ?? []) as { id: string; course_id: string }[]) {
         const c = merged.find((x) => x.id === a.course_id);
-        if (c && !seen.has(`End-sem set:${a.id}`)) {
+        if (c) {
           directItems.push({
             id: `endsem-${a.id}`,
             kind: 'End-sem set',
@@ -544,7 +522,7 @@ export default function HodConsole() {
         }
       }
     }
-    setApprovals([...directItems, ...notifItems]);
+    setApprovals(directItems);
 
     // at-risk students
     if (courseIds.length > 0) {
@@ -552,7 +530,7 @@ export default function HodConsole() {
       if (!are) setAtRisk((ar ?? []) as AtRiskStudent[]);
     }
     setLoading(false);
-  }, [loadDeptConfig]);
+  }, [hodDeptId, loadDeptConfig, profile?.institution_id]);
 
   const loadLive = useCallback(async () => {
     const courseIds = courses.map(c => c.id);
