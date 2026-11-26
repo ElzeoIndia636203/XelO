@@ -155,18 +155,6 @@ function AssistPanel({ courses }: { courses: Course[] }) {
 
 // ── main component ─────────────────────────────────────────────────────────
 
-interface RawHodCourse {
-  id: string;
-  code: string;
-  title: string;
-  final_status: string | null;
-  plan_status: string | null;
-  endsem_status: string | null;
-  batches: { name: string }[] | { name: string } | null;
-  profiles: { full_name: string } | null;
-  departments: { name: string } | null;
-}
-
 interface CourseStatRow {
   course_id: string;
   students: number;
@@ -422,16 +410,14 @@ export default function HodConsole() {
     setLoading(true);
     setErr('');
     void loadDeptConfig();
-    // load courses this HOD oversees
+    // load pending approvals via SECURITY DEFINER RPC first so they never get blocked by secondary queries
+    const { data: rpcApprovals, error: appErr } = await supabase.rpc('hod_pending_approvals');
+
+    // load courses this HOD oversees (plain columns to avoid PostgREST embed failures)
     const instId = profile?.institution_id ?? (await supabase.rpc('my_institution')).data;
     let coursesQuery = supabase
       .from('courses')
-      .select(`
-        id, code, title, final_status, plan_status, endsem_status,
-        batches(name),
-        profiles!courses_faculty_id_fkey(full_name),
-        departments(name)
-      `)
+      .select('id, code, title, department_id, faculty_id, final_status, plan_status, endsem_status, approval_hod_ids')
       .eq('institution_id', instId);
     if (hodDeptId && profile?.id) {
       coursesQuery = coursesQuery.or(`department_id.eq.${hodDeptId},approval_hod_ids.cs.{${profile.id}}`);
@@ -439,30 +425,51 @@ export default function HodConsole() {
       coursesQuery = coursesQuery.eq('department_id', hodDeptId);
     }
     const { data: rawCourses, error: ce } = await coursesQuery;
-    if (ce) { setErr(errorMessage(ce.message)); setLoading(false); return; }
+    if (ce) {
+      if (!appErr && Array.isArray(rpcApprovals)) {
+        setApprovals(rpcApprovals as ApprovalItem[]);
+      }
+      setErr(errorMessage(ce.message));
+      setLoading(false);
+      return;
+    }
 
-    const typedCourses = (rawCourses ?? []) as unknown as RawHodCourse[];
+    const typedCourses = (rawCourses ?? []) as unknown as Array<{
+      id: string;
+      code: string;
+      title: string;
+      department_id: string;
+      faculty_id: string;
+      final_status: string;
+      plan_status: string;
+      endsem_status: string;
+    }>;
     const courseIds = typedCourses.map((c) => c.id);
 
     let stats: CourseStatRow[] = [];
     if (courseIds.length > 0) {
-      const { data: s, error: se } = await supabase.rpc('course_stats', { p_course_ids: courseIds });
-      if (se) { setErr(errorMessage(se.message)); setLoading(false); return; }
+      const { data: s } = await supabase.rpc('course_stats', { p_course_ids: courseIds });
       stats = (s ?? []) as CourseStatRow[];
+    }
+
+    const deptIds = Array.from(new Set(typedCourses.map((c) => c.department_id).filter(Boolean)));
+    const deptNameMap = new Map<string, string>();
+    if (deptIds.length > 0) {
+      const { data: dRows } = await supabase.from('departments').select('id, name').in('id', deptIds);
+      for (const d of (dRows ?? []) as Array<{ id: string; name: string }>) {
+        deptNameMap.set(d.id, d.name);
+      }
     }
 
     const merged: Course[] = typedCourses.map((c) => {
       const st = stats.find((s) => s.course_id === c.id);
-      const batchName = Array.isArray(c.batches)
-        ? c.batches.map((b) => b.name).join(', ')
-        : c.batches?.name ?? '';
       return {
         id: c.id,
         code: c.code,
         title: c.title,
-        batch_name: batchName,
-        faculty_name: c.profiles?.full_name ?? '',
-        department_name: c.departments?.name ?? '',
+        batch_name: '',
+        faculty_name: '',
+        department_name: deptNameMap.get(c.department_id) ?? '',
         final_status: c.final_status,
         plan_status: c.plan_status,
         endsem_status: c.endsem_status,
@@ -477,54 +484,36 @@ export default function HodConsole() {
     });
     setCourses(merged);
 
-    // Build pending approvals directly from courses & end-sem assessments
-    const directItems: ApprovalItem[] = [];
-    for (const c of merged) {
-      if (c.plan_status === 'sent') {
-        directItems.push({
-          id: `plan-${c.id}`,
-          kind: 'Course plan',
-          course_code: c.code,
-          course_title: c.title,
-          what: 'Awaiting HOD approval',
-          age_hours: 1,
-          entity_id: c.id,
-        });
-      }
-      if (c.final_status === 'sent') {
-        directItems.push({
-          id: `final-${c.id}`,
-          kind: 'Final marks',
-          course_code: c.code,
-          course_title: c.title,
-          what: 'Awaiting HOD approval & CoE submission',
-          age_hours: 1,
-          entity_id: c.id,
-        });
-      }
-    }
-    if (courseIds.length > 0) {
-      const { data: pendingAssess } = await supabase
-        .from('assessments')
-        .select('id, course_id')
-        .in('course_id', courseIds)
-        .eq('hod_status', 'sent');
-      for (const a of (pendingAssess ?? []) as { id: string; course_id: string }[]) {
-        const c = merged.find((x) => x.id === a.course_id);
-        if (c) {
+    if (!appErr && Array.isArray(rpcApprovals)) {
+      setApprovals(rpcApprovals as ApprovalItem[]);
+    } else {
+      const directItems: ApprovalItem[] = [];
+      for (const c of merged) {
+        if (c.plan_status === 'sent') {
           directItems.push({
-            id: `endsem-${a.id}`,
-            kind: 'End-sem set',
+            id: `plan-${c.id}`,
+            kind: 'Course plan',
             course_code: c.code,
             course_title: c.title,
-            what: '30-question end-sem set awaiting HOD approval',
+            what: 'Awaiting HOD approval',
             age_hours: 1,
-            entity_id: a.id,
+            entity_id: c.id,
+          });
+        }
+        if (c.final_status === 'sent') {
+          directItems.push({
+            id: `final-${c.id}`,
+            kind: 'Final marks',
+            course_code: c.code,
+            course_title: c.title,
+            what: 'Awaiting HOD approval & CoE submission',
+            age_hours: 1,
+            entity_id: c.id,
           });
         }
       }
+      setApprovals(directItems);
     }
-    setApprovals(directItems);
 
     // at-risk students
     if (courseIds.length > 0) {
