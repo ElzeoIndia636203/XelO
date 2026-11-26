@@ -191,14 +191,14 @@ describe('Phase 2 Course Plan DB & RLS', () => {
       return r.rows[0]!.id;
     });
 
-    // Wrong domain rejected
-    const badRoster = [
-      { roll_no: '2301001', full_name: 'Bad', email: 'bad@gmail.com' },
+    // External-domain students invited by faculty are accepted
+    const extRoster = [
+      { roll_no: '2301001', full_name: 'External', email: 'ext@gmail.com' },
     ];
-    const domainErr = await err(
-      as(db, FAC_1, () => db.query(`SELECT * FROM import_roster($1, $2::jsonb)`, [courseId, JSON.stringify(badRoster)])),
+    const extBatches = await as(db, FAC_1, () =>
+      db.query(`SELECT * FROM import_roster($1, $2::jsonb)`, [courseId, JSON.stringify(extRoster)]),
     );
-    expect(domainErr).toContain('domain_mismatch');
+    expect(extBatches.rows.length).toBe(1);
 
     // 126 valid students split 63 + 63
     const roster = Array.from({ length: 126 }, (_, i) => ({

@@ -45,19 +45,18 @@ export function LoginPage() {
 
     const clean = email.trim().toLowerCase();
     if (!clean || !clean.includes('@')) {
-      setLocalError('Enter your institutional email address.');
-      return null;
-    }
-
-    if (!isDomainAllowed(clean, import.meta.env.VITE_ALLOWED_DOMAINS)) {
-      setLocalError(errorMessage('domain_mismatch'));
+      setLocalError('Enter your email address.');
       return null;
     }
 
     try {
       const preflight = await rpc<string>('preflight_sign_in', { p_email: clean });
       if (preflight !== 'ok') {
-        setLocalError(errorMessage(preflight));
+        if (preflight === 'domain_mismatch' && !isDomainAllowed(clean, import.meta.env.VITE_ALLOWED_DOMAINS)) {
+          setLocalError(errorMessage('domain_mismatch'));
+        } else {
+          setLocalError(errorMessage(preflight));
+        }
         return null;
       }
       return clean;
