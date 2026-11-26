@@ -4,6 +4,7 @@ import { FeedbackGateModal } from '../../components/FeedbackGateModal';
 import { NotificationBell } from '../../../components/NotificationBell';
 import { Elzeo, Wordmark } from '../../../components/ui';
 import { useSession } from '../../../lib/session';
+import { STUDENT_ASSESSMENT_ONLY } from '../../../lib/studentMode';
 
 export type StudentTabId = 'home' | 'classroom' | 'lab' | 'file' | 'endsem';
 
@@ -22,18 +23,20 @@ export function StudentShell({
 }) {
   const { profile, signOut } = useSession();
 
-  const navItems: Array<{ id: StudentTabId; label: string; to: string; visible: boolean }> = [
-    { id: 'home', label: 'Home', to: '/student', visible: true },
-    { id: 'classroom', label: 'Classroom', to: '/student/classroom', visible: true },
-    {
-      id: 'lab',
-      label: "Today's lab",
-      to: todaySessionId ? `/student/lab/${todaySessionId}` : '/student/lab',
-      visible: hasTodayLab || activeTab === 'lab',
-    },
-    { id: 'file', label: 'Lab file', to: '/student/lab-file', visible: true },
-    { id: 'endsem', label: 'End-sem', to: '/student/endsem', visible: hasScheduledExam || activeTab === 'endsem' },
-  ];
+  const navItems: Array<{ id: StudentTabId; label: string; to: string; visible: boolean }> = STUDENT_ASSESSMENT_ONLY
+    ? [{ id: 'endsem', label: 'Assessment', to: '/student/endsem', visible: true }]
+    : [
+        { id: 'home', label: 'Home', to: '/student', visible: true },
+        { id: 'classroom', label: 'Classroom', to: '/student/classroom', visible: true },
+        {
+          id: 'lab',
+          label: "Today's lab",
+          to: todaySessionId ? `/student/lab/${todaySessionId}` : '/student/lab',
+          visible: hasTodayLab || activeTab === 'lab',
+        },
+        { id: 'file', label: 'Lab file', to: '/student/lab-file', visible: true },
+        { id: 'endsem', label: 'End-sem', to: '/student/endsem', visible: hasScheduledExam || activeTab === 'endsem' },
+      ];
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--paper)' }}>
@@ -52,7 +55,7 @@ export function StudentShell({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Link to="/student" style={{ textDecoration: 'none' }}>
+          <Link to={STUDENT_ASSESSMENT_ONLY ? '/student/endsem' : '/student'} style={{ textDecoration: 'none' }}>
             <Wordmark dark />
           </Link>
           <Elzeo dark />

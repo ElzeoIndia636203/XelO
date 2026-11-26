@@ -7,6 +7,7 @@ import {
 } from 'react-router-dom';
 import { Card, Loading } from '../components/ui';
 import { SessionProvider, useSession } from '../lib/session';
+import { STUDENT_ASSESSMENT_ONLY } from '../lib/studentMode';
 import { homeForRole } from '../lib/logic/routing';
 import { RequireRole } from './components/RequireRole';
 import { LoginPage } from './pages/LoginPage';
@@ -194,9 +195,13 @@ const router = createBrowserRouter(
       path: '/student',
       element: (
         <RequireRole allow={['student']}>
-          <LazyWrap>
-            <StudentHome />
-          </LazyWrap>
+          {STUDENT_ASSESSMENT_ONLY ? (
+            <Navigate to="/student/endsem" replace />
+          ) : (
+            <LazyWrap>
+              <StudentHome />
+            </LazyWrap>
+          )}
         </RequireRole>
       ),
     },
@@ -204,9 +209,13 @@ const router = createBrowserRouter(
       path: '/student/lab',
       element: (
         <RequireRole allow={['student']}>
-          <LazyWrap>
-            <StudentLab />
-          </LazyWrap>
+          {STUDENT_ASSESSMENT_ONLY ? (
+            <Navigate to="/student/endsem" replace />
+          ) : (
+            <LazyWrap>
+              <StudentLab />
+            </LazyWrap>
+          )}
         </RequireRole>
       ),
     },
@@ -214,9 +223,13 @@ const router = createBrowserRouter(
       path: '/student/lab/:sessionId',
       element: (
         <RequireRole allow={['student']}>
-          <LazyWrap>
-            <StudentLab />
-          </LazyWrap>
+          {STUDENT_ASSESSMENT_ONLY ? (
+            <Navigate to="/student/endsem" replace />
+          ) : (
+            <LazyWrap>
+              <StudentLab />
+            </LazyWrap>
+          )}
         </RequireRole>
       ),
     },
@@ -224,9 +237,13 @@ const router = createBrowserRouter(
       path: '/student/test/:sessionId/:bank',
       element: (
         <RequireRole allow={['student']}>
-          <LazyWrap>
-            <StudentTest />
-          </LazyWrap>
+          {STUDENT_ASSESSMENT_ONLY ? (
+            <Navigate to="/student/endsem" replace />
+          ) : (
+            <LazyWrap>
+              <StudentTest />
+            </LazyWrap>
+          )}
         </RequireRole>
       ),
     },
@@ -234,9 +251,13 @@ const router = createBrowserRouter(
       path: '/student/classroom',
       element: (
         <RequireRole allow={['student']}>
-          <LazyWrap>
-            <StudentClassroom />
-          </LazyWrap>
+          {STUDENT_ASSESSMENT_ONLY ? (
+            <Navigate to="/student/endsem" replace />
+          ) : (
+            <LazyWrap>
+              <StudentClassroom />
+            </LazyWrap>
+          )}
         </RequireRole>
       ),
     },
@@ -244,9 +265,13 @@ const router = createBrowserRouter(
       path: '/student/lab-file',
       element: (
         <RequireRole allow={['student']}>
-          <LazyWrap>
-            <StudentLabFile />
-          </LazyWrap>
+          {STUDENT_ASSESSMENT_ONLY ? (
+            <Navigate to="/student/endsem" replace />
+          ) : (
+            <LazyWrap>
+              <StudentLabFile />
+            </LazyWrap>
+          )}
         </RequireRole>
       ),
     },
