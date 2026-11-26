@@ -3,6 +3,8 @@ const MESSAGES: Record<string, string> = {
   not_pending: 'This item is no longer pending.',
   recipient_busy_on_day: 'The recipient has blocked this day as busy. Please choose another date.',
   remark_required: 'Please enter a remark before declining or returning.',
+  department_required: 'Select a department for the HOD role.',
+  school_required: 'Select a school for the Dean role.',
   rubric_must_total_50: 'Rubric weights must total 50 marks.',
   not_onboarded:
     "This email isn't onboarded yet. Ask your faculty for an invite or your admin for an account.",

@@ -45,6 +45,8 @@ export interface Profile {
   roles?: UserRole[];
   school_id: string | null;
   department_id: string | null;
+  hod_department_id?: string | null;
+  dean_school_id?: string | null;
   roll_no: string | null;
   active: boolean;
   plan_override: PlanTier | null;
@@ -60,6 +62,8 @@ export interface Invite {
   full_name: string;
   school_id: string | null;
   department_id: string | null;
+  hod_department_id?: string | null;
+  dean_school_id?: string | null;
   roll_no: string | null;
   created_at: string;
   accepted_at: string | null;

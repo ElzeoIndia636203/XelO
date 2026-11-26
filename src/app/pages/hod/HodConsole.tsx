@@ -365,21 +365,23 @@ export default function HodConsole() {
 
   const [loading, setLoading] = useState(false);
 
+  const hodDeptId = profile?.hod_department_id ?? profile?.department_id ?? null;
+
   const loadDeptConfig = useCallback(async () => {
-    if (!profile?.department_id) return;
+    if (!hodDeptId) return;
     const [poRes, calRes, facRes] = await Promise.all([
       supabase
         .from('department_outcomes')
         .select('id, kind, code, statement')
-        .eq('department_id', profile.department_id)
+        .eq('department_id', hodDeptId)
         .order('kind', { ascending: true })
         .order('code', { ascending: true }),
       supabase
         .from('academic_calendars')
         .select('id, first_working_day, last_working_day, expected_endsem_date, saturday_rule, approved, updated_at')
-        .eq('department_id', profile.department_id)
+        .eq('department_id', hodDeptId)
         .maybeSingle(),
-      supabase.rpc('hod_faculty_summary', { p_department_id: profile.department_id }),
+      supabase.rpc('hod_faculty_summary', { p_department_id: hodDeptId }),
     ]);
 
     if (!facRes.error && facRes.data) {
@@ -421,7 +423,7 @@ export default function HodConsole() {
         .order('day');
       setCalEvents(((evRows ?? []) as CalendarEventRow[]));
     }
-  }, [profile]);
+  }, [hodDeptId]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -722,7 +724,7 @@ export default function HodConsole() {
   }
 
   async function saveAndApproveOutcomes() {
-    if (!profile?.department_id || !profile.institution_id) {
+    if (!hodDeptId || !profile?.institution_id) {
       setErr('Your HOD profile is missing a department assignment.');
       return;
     }
@@ -732,7 +734,7 @@ export default function HodConsole() {
     const { error: delErr } = await supabase
       .from('department_outcomes')
       .delete()
-      .eq('department_id', profile.department_id);
+      .eq('department_id', hodDeptId);
     if (delErr) {
       setPoBusy(false);
       setErr(errorMessage(delErr.message));
@@ -741,7 +743,7 @@ export default function HodConsole() {
     if (deptOutcomes.length > 0) {
       const rows = deptOutcomes.map((o) => ({
         institution_id: profile.institution_id,
-        department_id: profile.department_id,
+        department_id: hodDeptId,
         kind: o.kind,
         code: o.code.trim().toUpperCase(),
         statement: o.statement.trim(),
@@ -892,7 +894,7 @@ export default function HodConsole() {
   }
 
   async function saveAcademicCalendar(approve: boolean) {
-    if (!profile?.department_id || !profile.institution_id) {
+    if (!hodDeptId || !profile?.institution_id) {
       setErr('Your HOD profile is missing a department assignment.');
       return;
     }
@@ -922,7 +924,7 @@ export default function HodConsole() {
     const nextUpdatedAt = new Date().toISOString();
     const payload = {
       institution_id: profile.institution_id,
-      department_id: profile.department_id,
+      department_id: hodDeptId,
       first_working_day: calFirstDay,
       last_working_day: calLastDay,
       expected_endsem_date: calEndsemDate || null,
@@ -963,7 +965,7 @@ export default function HodConsole() {
       const evPayload = calEvents.map((ev) => ({
         calendar_id: activeCalId,
         institution_id: profile.institution_id,
-        department_id: profile.department_id,
+        department_id: hodDeptId,
         day: ev.day,
         kind: ev.kind,
         event_type: ev.event_type ?? null,
@@ -1439,7 +1441,7 @@ export default function HodConsole() {
                 </thead>
                 <tbody>
                   {facultyStats.map((f) => (
-                    <tr key={f.course_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <tr key={f.course_id ?? f.faculty_id} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '10px' }}>
                         <div style={{ fontWeight: 600 }}>{f.faculty_name}</div>
                         <div className="mono" style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
@@ -1447,24 +1449,34 @@ export default function HodConsole() {
                         </div>
                       </td>
                       <td style={{ padding: '10px' }}>
-                        <span className="mono" style={{ fontWeight: 600 }}>{f.course_code}</span> · {f.course_title}
+                        {f.course_id ? (
+                          <>
+                            <span className="mono" style={{ fontWeight: 600 }}>{f.course_code}</span> · {f.course_title}
+                          </>
+                        ) : (
+                          <span style={{ color: 'var(--muted)' }}>No courses assigned yet</span>
+                        )}
                       </td>
                       <td className="mono" style={{ padding: '10px' }}>
-                        {f.sessions_conducted}/{f.sessions_total}
+                        {f.course_id ? `${f.sessions_conducted}/${f.sessions_total}` : '—'}
                       </td>
-                      <td className="mono" style={{ padding: '10px' }}>{f.streak}</td>
+                      <td className="mono" style={{ padding: '10px' }}>{f.course_id ? f.streak : '—'}</td>
                       <td className="mono" style={{ padding: '10px', color: f.missed_classes > 0 ? '#dc2626' : 'var(--muted)' }}>
-                        {f.missed_classes}
+                        {f.course_id ? f.missed_classes : '—'}
                       </td>
-                      <td className="mono" style={{ padding: '10px' }}>{f.attendance_pct}%</td>
-                      <td className="mono" style={{ padding: '10px' }}>{f.avg_score_pct}%</td>
+                      <td className="mono" style={{ padding: '10px' }}>{f.course_id ? `${f.attendance_pct}%` : '—'}</td>
+                      <td className="mono" style={{ padding: '10px' }}>{f.course_id ? `${f.avg_score_pct}%` : '—'}</td>
                       <td style={{ padding: '10px', textAlign: 'right' }}>
                         <button
                           type="button"
                           className="btn field-sm"
                           onClick={() => {
                             setMeetingTarget(f);
-                            setMeetingTitle(`Review: ${f.course_code} (${f.course_title})`);
+                            setMeetingTitle(
+                              f.course_id
+                                ? `Review: ${f.course_code} (${f.course_title})`
+                                : `Department check-in: ${f.faculty_name}`,
+                            );
                           }}
                         >
                           Schedule meeting
@@ -2094,7 +2106,7 @@ export default function HodConsole() {
       )}
 
       {/* ── Feedback loop ── */}
-      {tab === 'feedback' && <FeedbackLoopTab departmentId={profile?.department_id ?? null} />}
+      {tab === 'feedback' && <FeedbackLoopTab departmentId={hodDeptId} />}
 
       {/* ── Final marks ── */}
       {tab === 'final' && (

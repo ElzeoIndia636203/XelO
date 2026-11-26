@@ -69,6 +69,8 @@ export function UsersTab({
   const [editInstId, setEditInstId] = useState('');
   const [editSchoolId, setEditSchoolId] = useState('');
   const [editDeptId, setEditDeptId] = useState('');
+  const [editHodDeptId, setEditHodDeptId] = useState('');
+  const [editDeanSchoolId, setEditDeanSchoolId] = useState('');
   const [busy, setBusy] = useState(false);
 
   const activeInstId = instId || institutions[0]?.id || '';
@@ -92,6 +94,33 @@ export function UsersTab({
     if (r === 'vc' || r === 'coe') return instMap.get(iId ?? '') ?? 'University';
     if (r === 'dean') return schoolMap.get(sId ?? '') ?? 'School';
     return deptMap.get(dId ?? '') ?? schoolMap.get(sId ?? '') ?? instMap.get(iId ?? '') ?? 'Department';
+  }
+
+  function profileScopeText(u: Profile): string {
+    const roles = u.roles && u.roles.length > 0 ? u.roles : [u.role];
+    if (roles.length <= 1) {
+      const r = roles[0] ?? u.role;
+      const dId = r === 'hod' ? u.hod_department_id ?? u.department_id : u.department_id;
+      const sId = r === 'dean' ? u.dean_school_id ?? u.school_id : u.school_id;
+      return scopeText(r, u.institution_id, sId, dId);
+    }
+    return roles
+      .map((r) => {
+        if (r === 'hod') {
+          const dept = deptMap.get(u.hod_department_id ?? u.department_id ?? '') ?? 'Unassigned';
+          return `HOD: ${dept}`;
+        }
+        if (r === 'dean') {
+          const sch = schoolMap.get(u.dean_school_id ?? u.school_id ?? '') ?? 'Unassigned';
+          return `Dean: ${sch}`;
+        }
+        if (r === 'faculty') {
+          const dept = deptMap.get(u.department_id ?? '') ?? 'Unassigned';
+          return `Faculty: ${dept}`;
+        }
+        return `${ROLE_LABELS[r]}: ${scopeText(r, u.institution_id, u.school_id, u.department_id)}`;
+      })
+      .join(' · ');
   }
 
   async function handleInvite(e: FormEvent) {
@@ -180,6 +209,9 @@ export function UsersTab({
     setEditInstId(u.institution_id ?? institutions[0]?.id ?? '');
     setEditSchoolId(u.school_id ?? '');
     setEditDeptId(u.department_id ?? '');
+    // Do not assume a faculty/staff member is HOD or Dean of their existing department/school.
+    setEditHodDeptId(u.hod_department_id ?? (current.includes('hod') ? u.department_id ?? '' : ''));
+    setEditDeanSchoolId(u.dean_school_id ?? (current.includes('dean') ? u.school_id ?? '' : ''));
   }
 
   function toggleEditRole(r: UserRole) {
@@ -194,6 +226,14 @@ export function UsersTab({
       onNotify('Select at least one role.', false);
       return;
     }
+    if (editRoles.includes('hod') && !editHodDeptId) {
+      onNotify('Select the department this user is appointed HOD of.', false);
+      return;
+    }
+    if (editRoles.includes('dean') && !editDeanSchoolId) {
+      onNotify('Select the school this user is appointed Dean of.', false);
+      return;
+    }
     setBusy(true);
     try {
       await rpc('admin_assign_roles', {
@@ -202,6 +242,8 @@ export function UsersTab({
         p_institution_id: editInstId || null,
         p_school_id: editSchoolId || null,
         p_department_id: editDeptId || null,
+        p_hod_department_id: editRoles.includes('hod') ? editHodDeptId || null : null,
+        p_dean_school_id: editRoles.includes('dean') ? editDeanSchoolId || null : null,
       });
       onNotify(`Updated roles for ${editingUser.email}.`, true);
       setEditingUser(null);
@@ -380,7 +422,7 @@ export function UsersTab({
                         .join(', ')}
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--muted)' }}>
-                      {scopeText(u.role, u.institution_id, u.school_id, u.department_id)}
+                      {profileScopeText(u)}
                     </td>
                     <td>
                       <Chip tone={u.active ? 'good' : 'bad'}>{u.active ? 'Active' : 'Disabled'}</Chip>
@@ -494,6 +536,8 @@ export function UsersTab({
                     setEditInstId(e.target.value);
                     setEditSchoolId('');
                     setEditDeptId('');
+                    setEditHodDeptId('');
+                    setEditDeanSchoolId('');
                   }}
                 >
                   <option value="">All / none</option>
@@ -504,17 +548,90 @@ export function UsersTab({
                   ))}
                 </select>
               </label>
+              {editRoles.includes('faculty') || (!editRoles.includes('hod') && !editRoles.includes('dean')) ? (
+                <label className="field-label">
+                  {editRoles.length > 1 ? 'Faculty / base school' : 'School'}
+                  <select
+                    className="field"
+                    value={editSchoolId}
+                    onChange={(e) => {
+                      setEditSchoolId(e.target.value);
+                      setEditDeptId('');
+                    }}
+                  >
+                    <option value="">None</option>
+                    {schools
+                      .filter((s) => !editInstId || s.institution_id === editInstId)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ) : (
+                <div />
+              )}
+            </div>
+            {editRoles.includes('faculty') || (!editRoles.includes('hod') && !editRoles.includes('dean')) ? (
               <label className="field-label">
-                School
+                {editRoles.length > 1 ? 'Faculty / base department' : 'Department'}
                 <select
                   className="field"
-                  value={editSchoolId}
-                  onChange={(e) => {
-                    setEditSchoolId(e.target.value);
-                    setEditDeptId('');
-                  }}
+                  value={editDeptId}
+                  onChange={(e) => setEditDeptId(e.target.value)}
                 >
                   <option value="">None</option>
+                  {departments
+                    .filter(
+                      (d) =>
+                        (!editInstId || d.institution_id === editInstId) &&
+                        (!editSchoolId || d.school_id === editSchoolId),
+                    )
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.code} · {d.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            ) : null}
+            {editRoles.includes('hod') ? (
+              <label className="field-label">
+                HOD for department *
+                <select
+                  className="field"
+                  required
+                  value={editHodDeptId}
+                  onChange={(e) => setEditHodDeptId(e.target.value)}
+                >
+                  <option value="">Select department for HOD role…</option>
+                  {departments
+                    .filter((d) => !editInstId || d.institution_id === editInstId)
+                    .map((d) => {
+                      const sName = schoolMap.get(d.school_id);
+                      return (
+                        <option key={d.id} value={d.id}>
+                          {d.code} · {d.name}{sName ? ` (${sName})` : ''}
+                        </option>
+                      );
+                    })}
+                </select>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  Confirm which department this person leads as HOD. All faculties in this department will be grouped under their HOD console.
+                </span>
+              </label>
+            ) : null}
+            {editRoles.includes('dean') ? (
+              <label className="field-label">
+                Dean for school *
+                <select
+                  className="field"
+                  required
+                  value={editDeanSchoolId}
+                  onChange={(e) => setEditDeanSchoolId(e.target.value)}
+                >
+                  <option value="">Select school for Dean role…</option>
                   {schools
                     .filter((s) => !editInstId || s.institution_id === editInstId)
                     .map((s) => (
@@ -524,28 +641,7 @@ export function UsersTab({
                     ))}
                 </select>
               </label>
-            </div>
-            <label className="field-label">
-              Department
-              <select
-                className="field"
-                value={editDeptId}
-                onChange={(e) => setEditDeptId(e.target.value)}
-              >
-                <option value="">None</option>
-                {departments
-                  .filter(
-                    (d) =>
-                      (!editInstId || d.institution_id === editInstId) &&
-                      (!editSchoolId || d.school_id === editSchoolId),
-                  )
-                  .map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.code} · {d.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
+            ) : null}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
               <button type="button" className="btn" onClick={() => setEditingUser(null)}>
                 Cancel
