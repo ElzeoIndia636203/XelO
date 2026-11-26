@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarLinkCard } from '../../../components/CalendarLinkCard';
 import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
-import { InteractiveAcademicCalendar } from '../../components/InteractiveAcademicCalendar';
+import { InteractiveAcademicCalendar, type CalendarOverlayEvent } from '../../components/InteractiveAcademicCalendar';
 import { Banner, Card, Chip, Empty, ErrorNote, Loading } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { formatDateIst, todayIso } from '../../../lib/format';
@@ -156,27 +156,24 @@ export function StudentHomePage() {
   // Build simple current/anchor month grid
   const anchorIso = todaySession?.scheduled_date ?? today;
   const anchorDate = new Date(`${anchorIso}T00:00:00Z`);
-  const yr = anchorDate.getUTCFullYear();
-  const mo = anchorDate.getUTCMonth();
-  const daysInMonth = new Date(Date.UTC(yr, mo + 1, 0)).getUTCDate();
-  const firstDow = (new Date(Date.UTC(yr, mo, 1)).getUTCDay() + 6) % 7; // Mon=0
   const monthLabel = new Intl.DateTimeFormat('en-IN', {
     month: 'long',
     year: 'numeric',
     timeZone: 'UTC',
   }).format(anchorDate);
 
-  const sessionsByDay = new Map<number, SessionRow[]>();
-  for (const s of data?.sessions ?? []) {
-    if (!s.scheduled_date) continue;
-    const sd = new Date(`${s.scheduled_date}T00:00:00Z`);
-    if (sd.getUTCFullYear() === yr && sd.getUTCMonth() === mo) {
-      const dom = sd.getUTCDate();
-      const arr = sessionsByDay.get(dom) ?? [];
-      arr.push(s);
-      sessionsByDay.set(dom, arr);
-    }
-  }
+  const courseById = new Map((data?.courses ?? []).map((c) => [c.id, c]));
+  const labCalendarEvents: CalendarOverlayEvent[] = (data?.sessions ?? [])
+    .filter((s) => Boolean(s.scheduled_date))
+    .map((s) => {
+      const co = courseById.get(s.course_id);
+      return {
+        day: s.scheduled_date!,
+        kind: 'academic_event',
+        event_type: 'Lab',
+        label: `${co?.code ?? 'Lab'} S${s.n}: ${s.topic}`,
+      };
+    });
 
   return (
     <StudentShell
@@ -297,63 +294,10 @@ export function StudentHomePage() {
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
           <div style={{ flex: '2 1 520px' }}>
-            <Card title={monthLabel} actions={<span style={{ fontSize: 12, color: 'var(--muted)' }}>Lab schedule</span>}>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-                  gap: 4,
-                  fontSize: 12,
-                }}
-              >
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-                  <div key={d} style={{ fontSize: 11, color: 'var(--muted)', padding: '2px 4px' }}>
-                    {d}
-                  </div>
-                ))}
-                {Array.from({ length: firstDow }, (_, idx) => (
-                  <div key={`pad-${idx}`} style={{ minHeight: 58 }} />
-                ))}
-                {Array.from({ length: daysInMonth }, (_, i) => {
-                  const day = i + 1;
-                  const evs = sessionsByDay.get(day) ?? [];
-                  return (
-                    <div
-                      key={day}
-                      style={{
-                        minHeight: 58,
-                        padding: 5,
-                        borderRadius: 5,
-                        border: '1px solid var(--border-soft)',
-                        background: 'var(--surface)',
-                      }}
-                    >
-                      <div className="mono" style={{ fontWeight: 600 }}>
-                        {day}
-                      </div>
-                      {evs.slice(0, 2).map((ev) => (
-                        <div
-                          key={ev.id}
-                          style={{
-                            marginTop: 2,
-                            padding: '1px 4px',
-                            borderRadius: 3,
-                            fontSize: 10,
-                            background: 'var(--ink)',
-                            color: '#FFFFFF',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          S{ev.n}
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
+            <InteractiveAcademicCalendar
+              title="Calendar, lab schedule & meetings"
+              extraEvents={labCalendarEvents}
+            />
           </div>
 
           <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -471,7 +415,6 @@ export function StudentHomePage() {
         </div>
 
         <CalendarLinkCard />
-        <InteractiveAcademicCalendar title="Calendar & approved meetings" />
         <HierarchyMeetingsCard
           title="Request meeting with faculty"
           allowNotify={false}

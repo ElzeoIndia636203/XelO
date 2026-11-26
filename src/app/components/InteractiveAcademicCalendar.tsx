@@ -77,6 +77,7 @@ function shiftMonth(ym: string, delta: number): string {
 export function InteractiveAcademicCalendar({
   title = 'Calendar & approved meetings',
   events: eventsProp,
+  extraEvents,
   firstWorkingDay: firstWorkingDayProp,
   lastWorkingDay: lastWorkingDayProp,
   expectedEndsemDate: expectedEndsemDateProp,
@@ -91,6 +92,7 @@ export function InteractiveAcademicCalendar({
 }: {
   title?: string;
   events?: readonly CalendarOverlayEvent[];
+  extraEvents?: readonly CalendarOverlayEvent[];
   firstWorkingDay?: string;
   lastWorkingDay?: string;
   expectedEndsemDate?: string;
@@ -154,7 +156,11 @@ export function InteractiveAcademicCalendar({
       : effectiveMode === 'meeting_request'
         ? recipientSessionEvents
         : [];
-  const events = syncedExtraEvents.length > 0 ? [...baseEvents, ...syncedExtraEvents] : baseEvents;
+  const events = [
+    ...baseEvents,
+    ...(extraEvents ?? []),
+    ...syncedExtraEvents,
+  ];
   const filteredContacts = contacts.filter((c) =>
     effectiveMode === 'meeting_request' ? c.relation === 'superior' : c.relation === 'subordinate',
   );
