@@ -349,8 +349,13 @@ export default function HodConsole() {
   const hodDeptId = profile?.hod_department_id ?? profile?.department_id ?? null;
 
   const loadDeptConfig = useCallback(async () => {
+    const facRes = await supabase.rpc('hod_faculty_summary', { p_department_id: hodDeptId });
+    if (!facRes.error && facRes.data) {
+      setFacultyStats((facRes.data as FacultyCourseStatRow[]) ?? []);
+    }
+
     if (!hodDeptId) return;
-    const [poRes, calRes, facRes] = await Promise.all([
+    const [poRes, calRes] = await Promise.all([
       supabase
         .from('department_outcomes')
         .select('id, kind, code, statement')
@@ -362,12 +367,7 @@ export default function HodConsole() {
         .select('id, first_working_day, last_working_day, expected_endsem_date, saturday_rule, approved, updated_at')
         .eq('department_id', hodDeptId)
         .maybeSingle(),
-      supabase.rpc('hod_faculty_summary', { p_department_id: hodDeptId }),
     ]);
-
-    if (!facRes.error && facRes.data) {
-      setFacultyStats((facRes.data as FacultyCourseStatRow[]) ?? []);
-    }
 
     if (poRes.error) {
       setErr(errorMessage(poRes.error.message));
