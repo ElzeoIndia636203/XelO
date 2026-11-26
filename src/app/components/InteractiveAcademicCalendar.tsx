@@ -384,14 +384,14 @@ export function InteractiveAcademicCalendar({
     <Card
       title={title}
       actions={
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 6, maxWidth: '100%' }}>
           <button type="button" className="btn field-sm" onClick={jumpNotifications}>
             Notifications
           </button>
           <button type="button" className="btn field-sm" onClick={() => setMonth((m) => shiftMonth(m, -1))}>
             Prev
           </button>
-          <span className="mono" style={{ fontSize: 12, minWidth: 74, textAlign: 'center' }}>
+          <span className="mono" style={{ fontSize: 12, minWidth: 64, textAlign: 'center' }}>
             {month}
           </span>
           <button type="button" className="btn field-sm" onClick={() => setMonth((m) => shiftMonth(m, 1))}>
