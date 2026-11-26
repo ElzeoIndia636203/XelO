@@ -433,7 +433,9 @@ export default function HodConsole() {
         departments(name)
       `)
       .eq('institution_id', instId);
-    if (hodDeptId) {
+    if (hodDeptId && profile?.id) {
+      coursesQuery = coursesQuery.or(`department_id.eq.${hodDeptId},approval_hod_ids.cs.{${profile.id}}`);
+    } else if (hodDeptId) {
       coursesQuery = coursesQuery.eq('department_id', hodDeptId);
     }
     const { data: rawCourses, error: ce } = await coursesQuery;
@@ -530,7 +532,7 @@ export default function HodConsole() {
       if (!are) setAtRisk((ar ?? []) as AtRiskStudent[]);
     }
     setLoading(false);
-  }, [hodDeptId, loadDeptConfig, profile?.institution_id]);
+  }, [hodDeptId, loadDeptConfig, profile]);
 
   const loadLive = useCallback(async () => {
     const courseIds = courses.map(c => c.id);

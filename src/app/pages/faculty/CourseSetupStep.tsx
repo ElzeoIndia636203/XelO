@@ -113,6 +113,35 @@ export function CourseSetupStep({
     });
   }, [course.department_id]);
 
+  interface HodOption {
+    id: string;
+    full_name: string;
+    email: string;
+    department_id: string | null;
+    department_code: string;
+    department_name: string;
+  }
+
+  const { data: hodOptions } = useLoad(async () => {
+    try {
+      return await rpc<HodOption[]>('list_institution_hods');
+    } catch {
+      return [] as HodOption[];
+    }
+  }, [course.institution_id]);
+
+  const [selectedHodIds, setSelectedHodIds] = useState<string[] | null>(() => {
+    const existing = (course as unknown as { approval_hod_ids?: string[] }).approval_hod_ids;
+    return existing && existing.length > 0 ? existing : null;
+  });
+
+  const effectiveHodIds: string[] =
+    selectedHodIds !== null
+      ? selectedHodIds
+      : (hodOptions ?? [])
+          .filter((h) => h.department_id === course.department_id)
+          .map((h) => h.id);
+
   const poColumns: readonly DeptOutcomeDef[] =
     deptOutcomes && deptOutcomes.length > 0
       ? deptOutcomes
@@ -424,6 +453,10 @@ export function CourseSetupStep({
   }
 
   async function submitPlan() {
+    if ((hodOptions ?? []).length > 0 && effectiveHodIds.length === 0) {
+      onNotify('Select at least one HOD for course plan approval.', false);
+      return;
+    }
     setBusy(true);
     try {
       const { error: rubErr } = await supabase
@@ -432,8 +465,11 @@ export function CourseSetupStep({
         .eq('id', course.id);
       if (rubErr) throw new Error(rubErr.message);
 
-      await rpc('submit_course_plan', { p_course_id: course.id });
-      onNotify('Course plan sent to the department HOD for approval.', true);
+      await rpc('submit_course_plan', {
+        p_course_id: course.id,
+        p_hod_ids: effectiveHodIds.length > 0 ? effectiveHodIds : null,
+      });
+      onNotify('Course plan sent to selected HOD(s) for approval.', true);
       onRefresh();
     } catch (err) {
       onNotify(errorMessage(err), false);
@@ -1072,15 +1108,104 @@ export function CourseSetupStep({
               </div>
 
               {!locked ? (
-                <div>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={busy}
-                    onClick={() => void submitPlan()}
-                  >
-                    Send course plan to HOD
-                  </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <label className="field-label">
+                    Select HOD(s) for approval
+                    <select
+                      className="field"
+                      value=""
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        if (!id) return;
+                        if (!effectiveHodIds.includes(id)) {
+                          setSelectedHodIds([...effectiveHodIds, id]);
+                        }
+                      }}
+                    >
+                      <option value="">
+                        {(hodOptions ?? []).length === 0
+                          ? 'No HODs onboarded yet'
+                          : 'Add / select HOD from institution…'}
+                      </option>
+                      {(hodOptions ?? [])
+                        .filter((h) => !effectiveHodIds.includes(h.id))
+                        .map((h) => (
+                          <option key={h.id} value={h.id}>
+                            {h.full_name}
+                            {h.department_code || h.department_name
+                              ? ` — ${[h.department_code, h.department_name].filter(Boolean).join(' · ')}`
+                              : ''}
+                            {` (${h.email})`}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  {effectiveHodIds.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {effectiveHodIds.map((hid) => {
+                        const h = (hodOptions ?? []).find((x) => x.id === hid);
+                        return (
+                          <span
+                            key={hid}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '3px 8px',
+                              borderRadius: 999,
+                              fontSize: 12,
+                              background: 'var(--bg-subtle)',
+                              border: '1px solid var(--border)',
+                            }}
+                          >
+                            {h
+                              ? `${h.full_name}${h.department_code ? ` (${h.department_code})` : ''}`
+                              : hid}
+                            <button
+                              type="button"
+                              aria-label="Remove HOD"
+                              onClick={() => setSelectedHodIds(effectiveHodIds.filter((x) => x !== hid))}
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                cursor: 'pointer',
+                                color: 'var(--muted)',
+                                fontWeight: 700,
+                                padding: 0,
+                                lineHeight: 1,
+                              }}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      You can select multiple HODs if this course is offered across multiple departments.
+                    </div>
+                  )}
+                  <div>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={busy || ((hodOptions ?? []).length > 0 && effectiveHodIds.length === 0)}
+                      onClick={() => void submitPlan()}
+                    >
+                      Send course plan to HOD{effectiveHodIds.length > 1 ? 's' : ''}
+                    </button>
+                  </div>
+                </div>
+              ) : effectiveHodIds.length > 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Approval HOD(s):{' '}
+                  {effectiveHodIds
+                    .map((hid) => {
+                      const h = (hodOptions ?? []).find((x) => x.id === hid);
+                      return h ? `${h.full_name}${h.department_code ? ` (${h.department_code})` : ''}` : hid;
+                    })
+                    .join(', ')}
                 </div>
               ) : null}
             </div>
