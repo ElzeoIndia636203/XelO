@@ -191,12 +191,27 @@ describe('Phase 2 Course Plan DB & RLS', () => {
       return r.rows[0]!.id;
     });
 
-    // External-domain students invited by faculty are accepted
+    // External-domain students are rejected by default, and only gmail/outlook are allowed when p_allow_personal = true
     const extRoster = [
       { roll_no: '2301001', full_name: 'External', email: 'ext@gmail.com' },
     ];
+    await expect(
+      as(db, FAC_1, () =>
+        db.query(`SELECT * FROM import_roster($1, $2::jsonb)`, [courseId, JSON.stringify(extRoster)]),
+      ),
+    ).rejects.toThrow(/domain_mismatch/);
+
+    await expect(
+      as(db, FAC_1, () =>
+        db.query(`SELECT * FROM import_roster($1, $2::jsonb, true)`, [
+          courseId,
+          JSON.stringify([{ roll_no: '2301002', full_name: 'Yahoo', email: 'ext@yahoo.com' }]),
+        ]),
+      ),
+    ).rejects.toThrow(/domain_mismatch/);
+
     const extBatches = await as(db, FAC_1, () =>
-      db.query(`SELECT * FROM import_roster($1, $2::jsonb)`, [courseId, JSON.stringify(extRoster)]),
+      db.query(`SELECT * FROM import_roster($1, $2::jsonb, true)`, [courseId, JSON.stringify(extRoster)]),
     );
     expect(extBatches.rows.length).toBe(1);
 

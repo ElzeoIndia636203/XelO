@@ -79,9 +79,12 @@ export function parseRosterGrid(rawRows: readonly (readonly unknown[])[]): Roste
   return out;
 }
 
+export const ALLOWED_PERSONAL_STUDENT_DOMAINS = ['gmail.com', 'outlook.com'] as const;
+
 export function validateRoster(
   rows: readonly RosterRow[],
   institutionDomain: string,
+  allowPersonalEmails = false,
 ): { valid: RosterRow[]; errors: string[] } {
   const errors: string[] = [];
   const valid: RosterRow[] = [];
@@ -104,8 +107,15 @@ export function validateRoster(
       errors.push(`Row ${lineNo}: invalid email (${email}).`);
       return;
     }
-    if (expectedDomain && dom !== expectedDomain) {
-      errors.push(`Row ${lineNo}: ${email} does not match @${expectedDomain}.`);
+    const matchesPersonal =
+      allowPersonalEmails &&
+      (ALLOWED_PERSONAL_STUDENT_DOMAINS as readonly string[]).includes(dom);
+    if (expectedDomain && dom !== expectedDomain && !matchesPersonal) {
+      errors.push(
+        allowPersonalEmails
+          ? `Row ${lineNo}: ${email} must use @${expectedDomain}, @gmail.com, or @outlook.com.`
+          : `Row ${lineNo}: ${email} does not match @${expectedDomain}.`,
+      );
       return;
     }
     if (seenEmails.has(email)) {

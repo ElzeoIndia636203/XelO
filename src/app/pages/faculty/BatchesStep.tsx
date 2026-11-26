@@ -33,8 +33,13 @@ export function BatchesStep({
   onRefresh: () => void;
 }) {
   const [csvText, setCsvText] = useState('');
+  const [allowPersonalEmails, setAllowPersonalEmails] = useState(false);
   const [parsedRows, setParsedRows] = useState<RosterRow[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [manualRoll, setManualRoll] = useState('');
+  const [manualName, setManualName] = useState('');
+  const [manualEmail, setManualEmail] = useState('');
+  const [manualBatchId, setManualBatchId] = useState('');
   const [batchEdits, setBatchEdits] = useState<
     Record<string, { slot: string; room: string; staff: string }>
   >({});
@@ -45,8 +50,8 @@ export function BatchesStep({
   const joinedCount = enrollments.length;
   const pendingCount = pendingEnrollments.length;
 
-  function processRows(raw: RosterRow[]) {
-    const { valid, errors } = validateRoster(raw, institutionDomain);
+  function processRows(raw: RosterRow[], allowPersonal = allowPersonalEmails) {
+    const { valid, errors } = validateRoster(raw, institutionDomain, allowPersonal);
     setParsedRows(valid);
     setParseErrors(errors);
   }
@@ -82,6 +87,7 @@ export function BatchesStep({
       >('import_roster', {
         p_course_id: course.id,
         p_rows: parsedRows,
+        p_allow_personal: allowPersonalEmails,
       });
 
       const batchCodeMap = new Map(created.map((b) => [b.batch_name, b.class_code]));
@@ -112,6 +118,54 @@ export function BatchesStep({
       setParsedRows([]);
       setCsvText('');
       onNotify(`Imported ${parsedRows.length} students into ${created.length} batches.${mailNote}`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function inviteSingleStudent(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanEmail = manualEmail.trim().toLowerCase();
+    if (!manualRoll.trim() || !manualName.trim() || !cleanEmail) {
+      onNotify('Enter roll number, full name, and student email.', false);
+      return;
+    }
+    const dom = cleanEmail.split('@')[1] ?? '';
+    if (dom !== institutionDomain.toLowerCase() && dom !== 'gmail.com' && dom !== 'outlook.com') {
+      onNotify(`Only @${institutionDomain}, @gmail.com, or @outlook.com student emails are allowed.`, false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await rpc('faculty_invite_student', {
+        p_course_id: course.id,
+        p_batch_id: manualBatchId || batches[0]?.id || null,
+        p_roll_no: manualRoll.trim(),
+        p_full_name: manualName.trim(),
+        p_email: cleanEmail,
+      });
+      try {
+        await fn('send-invites', {
+          institutionId: course.institution_id,
+          invites: [
+            {
+              email: cleanEmail,
+              fullName: manualName.trim(),
+              role: 'student',
+              classCode: (batches.find((b) => b.id === (manualBatchId || batches[0]?.id)) ?? batches[0])?.class_code,
+            },
+          ],
+        });
+      } catch {
+        // Invite row already saved
+      }
+      setManualRoll('');
+      setManualName('');
+      setManualEmail('');
+      onNotify(`Invited student ${cleanEmail}.`, true);
       onRefresh();
     } catch (err) {
       onNotify(errorMessage(err), false);
@@ -215,6 +269,59 @@ export function BatchesStep({
         </div>
       </Card>
 
+      <Card title="Invite individual student (Institutional, Gmail, or Outlook)">
+        <form onSubmit={inviteSingleStudent} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+          <label className="field-label">
+            Roll no
+            <input
+              className="field mono"
+              value={manualRoll}
+              onChange={(e) => setManualRoll(e.target.value)}
+              placeholder="2301044"
+              style={{ width: 120 }}
+            />
+          </label>
+          <label className="field-label" style={{ flex: '1 1 180px' }}>
+            Full name
+            <input
+              className="field"
+              value={manualName}
+              onChange={(e) => setManualName(e.target.value)}
+              placeholder="Student name"
+            />
+          </label>
+          <label className="field-label" style={{ flex: '1 1 220px' }}>
+            Student email (@{institutionDomain}, @gmail.com, @outlook.com)
+            <input
+              className="field"
+              type="email"
+              value={manualEmail}
+              onChange={(e) => setManualEmail(e.target.value)}
+              placeholder="student@gmail.com"
+            />
+          </label>
+          {batches.length > 0 && (
+            <label className="field-label">
+              Batch
+              <select
+                className="field"
+                value={manualBatchId || batches[0]?.id || ''}
+                onChange={(e) => setManualBatchId(e.target.value)}
+              >
+                {batches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            Send student invite
+          </button>
+        </form>
+      </Card>
+
       <Card title="Import roster (CSV or Excel)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>
@@ -222,7 +329,7 @@ export function BatchesStep({
             evenly at most 65 students per batch.
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center' }}>
             <input
               type="file"
               aria-label="Upload roster file"
@@ -230,6 +337,18 @@ export function BatchesStep({
               disabled={hasConductedSession}
               onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
             />
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={allowPersonalEmails}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setAllowPersonalEmails(next);
+                  if (csvText.trim()) processRows(parseRosterCsv(csvText), next);
+                }}
+              />
+              Allow personal student emails (<code>gmail.com</code>, <code>outlook.com</code> only)
+            </label>
           </div>
 
           <label className="field-label">

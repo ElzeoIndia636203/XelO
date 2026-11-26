@@ -102,7 +102,12 @@ export function UsersTab({
       onNotify('Enter a full name and select an institution.', false);
       return;
     }
-    if (emailDomain(cleanEmail) !== selectedInst.email_domain.toLowerCase()) {
+    const dom = emailDomain(cleanEmail);
+    if (['gmail.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com'].includes(dom)) {
+      onNotify('Faculty and staff cannot be onboarded with a personal email address.', false);
+      return;
+    }
+    if (dom !== selectedInst.email_domain.toLowerCase()) {
       onNotify(`Enter a valid @${selectedInst.email_domain} email address.`, false);
       return;
     }
