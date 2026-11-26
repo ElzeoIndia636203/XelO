@@ -238,10 +238,9 @@ export function validateLabCandidatesDraft(
     }
 
     const langsToCheck = requiredLangs.length > 0 ? requiredLangs : (['c'] as const);
-    for (const lang of langsToCheck) {
-      if (!refMap.has(lang)) {
-        throw new Error('invalid_ai_shape');
-      }
+    const hasAtLeastOne = langsToCheck.some((lang) => refMap.has(lang)) || refMap.size > 0;
+    if (!hasAtLeastOne) {
+      throw new Error('invalid_ai_shape');
     }
 
     const refs = Object.fromEntries(refMap.entries()) as Partial<Record<AllowedLang, string>>;

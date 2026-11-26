@@ -357,9 +357,9 @@ Deno.serve(async (req: Request) => {
       const candidates = await callLlmJson(
         {
           system:
-            'You are XeIO Assist. Return ONLY valid JSON {"candidates":[...]}. Generate exactly 4 distinct programming lab questions (easy, medium, hard, medium). Each candidate has: title, statement, input_spec, output_spec, constraints, difficulty, co_code, visible_tests (exact array of 2 {input, expected}), hidden_tests (exact array of 3 {input, expected}), and references (object mapping every required language code to working stdin/stdout solution).',
-          user: `Course: ${course.code} ${course.title}\nSession S${session.n}: ${session.topic}\nCO: ${coRow?.code ?? 'CO1'} (${coRow?.statement ?? ''}), BTL L${session.btl}\nRequired languages: ${allowedLangs.join(', ')}\nAvoid these existing titles: ${existingTitles.slice(0, 40).join(' | ')}`,
-          maxTokens: 4096,
+            'You are XeIO Assist. Return ONLY valid JSON {"candidates":[...]}. Generate exactly 4 distinct programming lab questions (easy, medium, hard, medium). Each candidate has: title, statement, input_spec, output_spec, constraints, difficulty, co_code, visible_tests (exact array of 2 {input, expected}), hidden_tests (exact array of 3 {input, expected}), and references (object mapping enabled language codes to working stdin/stdout solution).',
+          user: `Course: ${course.code} ${course.title}\nSession S${session.n}: ${session.topic}\nCO: ${coRow?.code ?? 'CO1'} (${coRow?.statement ?? ''}), BTL L${session.btl}\nEnabled languages: ${allowedLangs.join(', ')}\nAvoid these existing titles: ${existingTitles.slice(0, 40).join(' | ')}`,
+          maxTokens: 8192,
         },
         (raw) => validateLabCandidatesDraft(raw, allowedLangs, existingTitles),
       );
@@ -428,22 +428,27 @@ Deno.serve(async (req: Request) => {
         await admin.from('reference_solutions').insert(refRows);
 
         if (judgeUrl) {
-          const valRes = await validateQuestionWithRunner({
-            allowedLangs,
-            tests: tcRows,
-            references: cand.references,
-            runTest: (lang, code, tc) =>
-              runOnJudge0(
-                { baseUrl: judgeUrl, apiKey: judgeKey, authHeader: judgeHeader, langIds },
-                lang,
-                code,
-                tc,
-              ),
-          });
-          await admin
-            .from('questions')
-            .update({ valid: valRes.valid, validation_note: valRes.validation_note })
-            .eq('id', qRow.id);
+          try {
+            const refLangs = Object.keys(cand.references) as AllowedLang[];
+            const valRes = await validateQuestionWithRunner({
+              allowedLangs: refLangs.length > 0 ? refLangs : allowedLangs,
+              tests: tcRows,
+              references: cand.references,
+              runTest: (lang, code, tc) =>
+                runOnJudge0(
+                  { baseUrl: judgeUrl, apiKey: judgeKey, authHeader: judgeHeader, langIds },
+                  lang,
+                  code,
+                  tc,
+                ),
+            });
+            await admin
+              .from('questions')
+              .update({ valid: valRes.valid, validation_note: valRes.validation_note })
+              .eq('id', qRow.id);
+          } catch {
+            // Keep candidate in needs-validation state if runner times out.
+          }
         }
 
         insertedIds.push(qRow.id as string);

@@ -76,6 +76,7 @@ export function LabQuestionsStep({
   const [uploadModalSession, setUploadModalSession] = useState<SessionRow | null>(null);
   const [uploadItems, setUploadItems] = useState<ParsedLabQuestion[]>([]);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
+  const [previewItem, setPreviewItem] = useState<{ session: SessionRow; question: QuestionRow } | null>(null);
 
   if (course.plan_status !== 'approved' || sessions.length === 0) {
     return (
@@ -216,6 +217,28 @@ export function LabQuestionsStep({
       onNotify(errorMessage(err), false);
     } finally {
       setValidatingIds((prev) => ({ ...prev, [qId]: false }));
+    }
+  }
+
+  async function rejectQuestion(session: SessionRow, q: QuestionRow) {
+    setBusyKey(`reject-${q.id}`);
+    try {
+      await rpc('faculty_reject_question', { p_question_id: q.id });
+      setDraftSelection((prev) => {
+        const next = new Map(prev);
+        const cur = next.get(session.id);
+        if (cur) next.set(session.id, cur.filter((id) => id !== q.id));
+        return next;
+      });
+      if (previewItem?.question.id === q.id) {
+        setPreviewItem(null);
+      }
+      onNotify(`Rejected "${q.title}".`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusyKey(null);
     }
   }
 
@@ -492,6 +515,31 @@ export function LabQuestionsStep({
                             {q.constraints ? <div><strong>Constraints:</strong> {q.constraints}</div> : null}
                           </div>
                         </details>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            onClick={() => setPreviewItem({ session: s, question: q })}
+                          >
+                            Preview
+                          </button>
+                          <button
+                            type="button"
+                            className={checked ? 'btn btn-primary field-sm' : 'btn field-sm'}
+                            disabled={!isValid || busyKey !== null}
+                            onClick={() => handleToggle(s, q)}
+                          >
+                            {checked ? 'Selected' : 'Select'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            disabled={busyKey !== null}
+                            onClick={() => void rejectQuestion(s, q)}
+                          >
+                            {busyKey === `reject-${q.id}` ? 'Rejecting…' : 'Reject'}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -792,6 +840,98 @@ export function LabQuestionsStep({
             </button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={previewItem !== null}
+        title={previewItem ? `Preview · S${previewItem.session.n} · ${previewItem.question.title}` : 'Question preview'}
+        onClose={() => setPreviewItem(null)}
+      >
+        {previewItem ? (() => {
+          const { session: ps, question: pq } = previewItem;
+          const pTcs = tcByQuestion.get(pq.id) ?? [];
+          const pVis = pTcs.filter((t) => !t.hidden);
+          const pHid = pTcs.filter((t) => t.hidden);
+          const pSelected = getSelectedIds(ps.id).includes(pq.id);
+          const pValid = pq.valid === true;
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '72vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                <Chip tone="neutral">{pq.difficulty}</Chip>
+                <Chip tone="neutral">{pq.co_code}</Chip>
+                <Chip tone={pValid ? 'good' : pq.valid === false ? 'bad' : 'warn'}>
+                  {pValid ? 'Checks passed' : pq.valid === false ? 'Validation failed' : 'Needs validation'}
+                </Chip>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>Problem statement</div>
+                <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{pq.statement}</div>
+              </div>
+              {(pq.input_spec || pq.output_spec || pq.constraints) ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5, padding: 10, borderRadius: 6, background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+                  {pq.input_spec ? <div><strong>Input:</strong> {pq.input_spec}</div> : null}
+                  {pq.output_spec ? <div><strong>Output:</strong> {pq.output_spec}</div> : null}
+                  {pq.constraints ? <div><strong>Constraints:</strong> {pq.constraints}</div> : null}
+                </div>
+              ) : null}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>
+                    Visible test cases ({pVis.length})
+                  </div>
+                  {pVis.map((tc, i) => (
+                    <div key={tc.id} className="mono" style={{ fontSize: 11.5, padding: 6, marginBottom: 4, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                      <div><strong>#{i + 1} In:</strong> {tc.input}</div>
+                      <div><strong>Out:</strong> {tc.expected}</div>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>
+                    Hidden test cases ({pHid.length})
+                  </div>
+                  {pHid.map((tc, i) => (
+                    <div key={tc.id} className="mono" style={{ fontSize: 11.5, padding: 6, marginBottom: 4, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                      <div><strong>#{i + 1} In:</strong> {tc.input}</div>
+                      <div><strong>Out:</strong> {tc.expected}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                {!pValid ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={validatingIds[pq.id] === true}
+                    onClick={() => void validateOne(pq.id)}
+                  >
+                    {validatingIds[pq.id] ? 'Validating…' : 'Validate'}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busyKey !== null}
+                  onClick={() => void rejectQuestion(ps, pq)}
+                >
+                  {busyKey === `reject-${pq.id}` ? 'Rejecting…' : 'Reject'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!pValid || busyKey !== null}
+                  onClick={() => {
+                    handleToggle(ps, pq);
+                    setPreviewItem(null);
+                  }}
+                >
+                  {pSelected ? 'Unselect' : 'Select for session'}
+                </button>
+              </div>
+            </div>
+          );
+        })() : null}
       </Modal>
     </div>
   );
