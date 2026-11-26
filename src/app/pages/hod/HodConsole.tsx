@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { fn, supabase } from '../../../lib/supabase';
-import { Modal } from '../../../components/ui';
+import { Modal, TimePicker } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { useSession } from '../../../lib/session';
 import { ConsoleShell, type NavItem } from '../../components/ConsoleShell';
@@ -1529,12 +1529,7 @@ export default function HodConsole() {
               </label>
               <label className="field-label">
                 Time (IST)
-                <input
-                  className="field mono"
-                  type="time"
-                  value={meetingTime}
-                  onChange={(e) => setMeetingTime(e.target.value)}
-                />
+                <TimePicker value={meetingTime} onChange={setMeetingTime} />
               </label>
               <label className="field-label" style={{ flex: '1 1 200px' }}>
                 Note

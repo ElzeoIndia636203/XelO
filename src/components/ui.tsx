@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 export type Tone = 'good' | 'warn' | 'bad' | 'neutral';
 
@@ -309,6 +309,126 @@ export function Kpis({
           <div className="kpi-value">{item.value}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Scrollable 12-hour time picker popup returning 24h "HH:MM". */
+export function TimePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next24h: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const [rawH, rawM] = (value || '10:30').split(':').map((x) => Number(x));
+  const h24 = Number.isFinite(rawH) ? Math.max(0, Math.min(23, rawH!)) : 10;
+  const minVal = Number.isFinite(rawM) ? Math.max(0, Math.min(59, rawM!)) : 30;
+  const period: 'AM' | 'PM' = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [open]);
+
+  function emit(nextH12: number, nextMin: number, nextPeriod: 'AM' | 'PM') {
+    let next24 = nextH12 % 12;
+    if (nextPeriod === 'PM') next24 += 12;
+    onChange(`${String(next24).padStart(2, '0')}:${String(nextMin).padStart(2, '0')}`);
+  }
+
+  const hours = Array.from({ length: 12 }, (_, i) => i + 1);
+  const minutes = Array.from({ length: 12 }, (_, i) => i * 5);
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        className="field mono"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          minWidth: 118,
+          textAlign: 'left',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          cursor: 'pointer',
+          background: 'var(--surface)',
+        }}
+      >
+        <span>
+          {String(h12).padStart(2, '0')}:{String(minVal).padStart(2, '0')} {period}
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--muted)' }}>▼</span>
+      </button>
+      {open ? (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            left: 0,
+            zIndex: 50,
+            display: 'flex',
+            gap: 4,
+            padding: 8,
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          }}
+        >
+          <div style={{ maxHeight: 190, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 44 }}>
+            {hours.map((hr) => (
+              <button
+                key={hr}
+                type="button"
+                className={hr === h12 ? 'btn btn-primary field-sm mono' : 'btn field-sm mono'}
+                style={{ padding: '4px 8px', justifyContent: 'center' }}
+                onClick={() => emit(hr, minVal, period)}
+              >
+                {String(hr).padStart(2, '0')}
+              </button>
+            ))}
+          </div>
+          <div style={{ maxHeight: 190, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 44 }}>
+            {minutes.map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={m === minVal ? 'btn btn-primary field-sm mono' : 'btn field-sm mono'}
+                style={{ padding: '4px 8px', justifyContent: 'center' }}
+                onClick={() => emit(h12, m, period)}
+              >
+                {String(m).padStart(2, '0')}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 44 }}>
+            {(['AM', 'PM'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                className={p === period ? 'btn btn-primary field-sm mono' : 'btn field-sm mono'}
+                style={{ padding: '4px 8px', justifyContent: 'center' }}
+                onClick={() => emit(h12, minVal, p)}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
