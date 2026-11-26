@@ -81,6 +81,10 @@ export function InteractiveAcademicCalendar({
   lastWorkingDay: lastWorkingDayProp,
   expectedEndsemDate: expectedEndsemDateProp,
   saturdayRule: saturdayRuleProp,
+  departmentId: departmentIdProp,
+  viewUserId,
+  viewUserLabel,
+  defaultRecipientId,
   initialMonth,
   onSelectDateForEvent,
   onJumpToNotifications,
@@ -91,6 +95,10 @@ export function InteractiveAcademicCalendar({
   lastWorkingDay?: string;
   expectedEndsemDate?: string;
   saturdayRule?: CalendarSaturdayRule;
+  departmentId?: string | null;
+  viewUserId?: string | null;
+  viewUserLabel?: string;
+  defaultRecipientId?: string;
   initialMonth?: string;
   onSelectDateForEvent?: (isoDate: string) => void;
   onJumpToNotifications?: () => void;
@@ -101,6 +109,7 @@ export function InteractiveAcademicCalendar({
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [myBusyDays, setMyBusyDays] = useState<BusyDayItem[]>([]);
   const [recipientBusyDays, setRecipientBusyDays] = useState<BusyDayItem[]>([]);
+  const [facultySessionEvents, setFacultySessionEvents] = useState<CalendarOverlayEvent[]>([]);
   const [loadedCal, setLoadedCal] = useState<{
     first_working_day?: string;
     last_working_day?: string;
@@ -109,8 +118,10 @@ export function InteractiveAcademicCalendar({
     events: CalendarOverlayEvent[];
   } | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
-  const [actionMode, setActionMode] = useState<'meeting_request' | 'meeting_scheduled' | 'notify'>('meeting_request');
-  const [recipientId, setRecipientId] = useState('');
+  const [actionMode, setActionMode] = useState<'meeting_request' | 'meeting_scheduled' | 'notify'>(() =>
+    defaultRecipientId ? 'meeting_scheduled' : 'meeting_request',
+  );
+  const [recipientId, setRecipientId] = useState(defaultRecipientId ?? '');
   const [meetingTitle, setMeetingTitle] = useState('');
   const [purpose, setPurpose] = useState('');
   const [busyReason, setBusyReason] = useState('Busy');
@@ -119,7 +130,8 @@ export function InteractiveAcademicCalendar({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
-  const events = eventsProp ?? loadedCal?.events ?? [];
+  const baseEvents = eventsProp ?? loadedCal?.events ?? [];
+  const events = facultySessionEvents.length > 0 ? [...baseEvents, ...facultySessionEvents] : baseEvents;
   const firstWorkingDay = firstWorkingDayProp ?? loadedCal?.first_working_day;
   const lastWorkingDay = lastWorkingDayProp ?? loadedCal?.last_working_day;
   const expectedEndsemDate = expectedEndsemDateProp ?? loadedCal?.expected_endsem_date ?? undefined;
@@ -142,10 +154,14 @@ export function InteractiveAcademicCalendar({
     filteredContacts.find((c) => c.id === recipientId)?.id ?? filteredContacts[0]?.id ?? '';
 
   const fetchCalendarData = useCallback(async () => {
-    const [{ data: mData }, { data: cData, error: cErr }, { data: bData }] = await Promise.all([
-      supabase.rpc('calendar_approved_meetings'),
+    const targetUser = viewUserId || null;
+    const [{ data: mData }, { data: cData, error: cErr }, { data: bData }, { data: fsData }] = await Promise.all([
+      supabase.rpc('calendar_approved_meetings', targetUser ? { p_user_id: targetUser } : {}),
       supabase.rpc('list_hierarchy_contacts'),
-      supabase.rpc('list_busy_days'),
+      supabase.rpc('list_busy_days', targetUser ? { p_user_id: targetUser } : {}),
+      targetUser
+        ? supabase.rpc('faculty_calendar_sessions', { p_user_id: targetUser })
+        : Promise.resolve({ data: [] as unknown[] }),
     ]);
     let calPayload: {
       first_working_day?: string;
@@ -154,14 +170,15 @@ export function InteractiveAcademicCalendar({
       saturday_rule?: CalendarSaturdayRule;
       events: CalendarOverlayEvent[];
     } | null = null;
+    const effectiveDeptId = departmentIdProp ?? profile?.hod_department_id ?? profile?.department_id ?? null;
     if (eventsProp === undefined && profile?.institution_id) {
       let calQuery = supabase
         .from('academic_calendars')
         .select('id, first_working_day, last_working_day, expected_endsem_date, saturday_rule')
         .eq('approved', true)
         .eq('institution_id', profile.institution_id);
-      if (profile.department_id) {
-        calQuery = calQuery.eq('department_id', profile.department_id);
+      if (effectiveDeptId) {
+        calQuery = calQuery.eq('department_id', effectiveDeptId);
       }
       const { data: calRows } = await calQuery.limit(1);
       const calRow = (calRows?.[0] ?? null) as {
@@ -186,14 +203,25 @@ export function InteractiveAcademicCalendar({
         };
       }
     }
+    const sessEvents: CalendarOverlayEvent[] = Array.isArray(fsData)
+      ? (fsData as Array<{ course_code: string; session_n: number; session_title: string; scheduled_date: string }>).map(
+          (s) => ({
+            day: s.scheduled_date,
+            kind: 'academic_event',
+            event_type: 'Lab',
+            label: `${s.course_code} S${s.session_n}: ${s.session_title}`,
+          }),
+        )
+      : [];
     return {
       meetings: (mData ?? []) as CalendarMeetingItem[],
       contacts: (cData ?? []) as ContactOption[],
       contactsErr: cErr ? errorMessage(cErr.message) : '',
       busyDays: (bData ?? []) as BusyDayItem[],
+      sessionEvents: sessEvents,
       calPayload,
     };
-  }, [eventsProp, profile]);
+  }, [departmentIdProp, eventsProp, profile, viewUserId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,6 +230,7 @@ export function InteractiveAcademicCalendar({
       setMeetings(res.meetings);
       setContacts(res.contacts);
       setMyBusyDays(res.busyDays);
+      setFacultySessionEvents(res.sessionEvents);
       if (res.contactsErr) {
         setMsg({ text: res.contactsErr, ok: false });
       }
@@ -342,7 +371,9 @@ export function InteractiveAcademicCalendar({
       }
     >
       <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-        Click any date to request or schedule a meeting (with purpose and duration), add an event, or view approved meetings.
+        {viewUserLabel
+          ? `Viewing ${viewUserLabel}'s calendar (scheduled labs, busy days & meetings). Click any date to schedule a meeting.`
+          : 'Click any date to request or schedule a meeting (with purpose and duration), add an event, or view approved meetings.'}
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10, fontSize: 11 }}>

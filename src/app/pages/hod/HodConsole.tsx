@@ -351,6 +351,7 @@ export default function HodConsole() {
   const [calLoadedUpdatedAt, setCalLoadedUpdatedAt] = useState<string | null>(null);
   const calEventFormRef = useRef<HTMLFormElement | null>(null);
   const [facultyStats, setFacultyStats] = useState<FacultyCourseStatRow[]>([]);
+  const [selectedCalFacultyId, setSelectedCalFacultyId] = useState<string | null>(null);
   const [meetingTarget, setMeetingTarget] = useState<FacultyCourseStatRow | null>(null);
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingAt, setMeetingAt] = useState('');
@@ -1058,6 +1059,54 @@ export default function HodConsole() {
           </div>
 
           <AssistPanel courses={courses} />
+
+          {/* ── Department & Faculty Calendar (Landing view) ── */}
+          {(() => {
+            const deptFaculties = Array.from(
+              new Map(
+                facultyStats.map((f) => [
+                  f.faculty_id,
+                  { id: f.faculty_id, name: f.faculty_name, email: f.faculty_email },
+                ]),
+              ).values(),
+            );
+            const activeFac = deptFaculties.find((f) => f.id === selectedCalFacultyId) ?? null;
+            return (
+              <div style={{ marginTop: 20, marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--muted)', marginRight: 4 }}>
+                    Calendar view:
+                  </span>
+                  <button
+                    type="button"
+                    className={!activeFac ? 'btn btn-primary field-sm' : 'btn field-sm'}
+                    onClick={() => setSelectedCalFacultyId(null)}
+                  >
+                    Department / My HOD calendar
+                  </button>
+                  {deptFaculties.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      className={activeFac?.id === f.id ? 'btn btn-primary field-sm' : 'btn field-sm'}
+                      onClick={() => setSelectedCalFacultyId(f.id)}
+                      title={f.email}
+                    >
+                      {f.name}
+                    </button>
+                  ))}
+                </div>
+                <InteractiveAcademicCalendar
+                  key={activeFac?.id ?? 'dept'}
+                  title={activeFac ? `${activeFac.name}'s calendar (labs, busy days & meetings)` : 'Department calendar & meetings'}
+                  departmentId={hodDeptId}
+                  viewUserId={activeFac?.id ?? null}
+                  viewUserLabel={activeFac?.name}
+                  defaultRecipientId={activeFac?.id}
+                />
+              </div>
+            );
+          })()}
 
           {approvals.length > 0 && (
             <div style={{ marginBottom: 24 }}>
