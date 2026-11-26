@@ -42,6 +42,22 @@ export function InstitutionsTab({
   const schoolsForDept = schools.filter((s) => s.institution_id === activeDeptInst);
   const activeDeptSchool = deptSchoolId || schoolsForDept[0]?.id || '';
 
+  async function removeInstitution(inst: Institution) {
+    if (!window.confirm(`Remove institution "${inst.name}" (@${inst.email_domain})? This cannot be undone.`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await rpc('admin_remove_institution', { p_institution_id: inst.id });
+      onNotify(`Removed ${inst.name}.`, true);
+      await onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addInstitution(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -247,6 +263,7 @@ export function InstitutionsTab({
                   <th style={{ textAlign: 'right' }}>Departments</th>
                   <th>Plan</th>
                   <th>Validity</th>
+                  <th style={{ textAlign: 'right' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -276,6 +293,16 @@ export function InstitutionsTab({
                         {inst.plan_start && inst.plan_end
                           ? `${formatDateIst(inst.plan_start)} – ${formatDateIst(inst.plan_end)}`
                           : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          className="btn field-sm"
+                          disabled={busy}
+                          onClick={() => void removeInstitution(inst)}
+                        >
+                          Remove
+                        </button>
                       </td>
                     </tr>
                   );
