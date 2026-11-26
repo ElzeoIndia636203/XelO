@@ -2269,7 +2269,8 @@ export default function HodConsole() {
         {previewLoading ? (
           <div style={{ padding: 16, color: 'var(--muted)' }}>Loading course plan…</div>
         ) : previewData ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxHeight: '72vh', overflowY: 'auto', paddingRight: 4 }}>
+            {err ? <div style={{ color: '#dc2626', fontSize: 13 }}>{err}</div> : null}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, fontSize: 13, padding: 12, borderRadius: 6, background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
               <div><span style={{ color: 'var(--muted)' }}>Faculty:</span> <strong>{previewData.course.faculty_name}</strong></div>
               <div><span style={{ color: 'var(--muted)' }}>Department:</span> <strong>{previewData.course.department_name || '—'}</strong></div>
