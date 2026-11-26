@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Card, Chip } from '../../components/ui';
+import { Card, Chip, TimePicker } from '../../components/ui';
 import { errorMessage } from '../../lib/errors';
 import { formatDateTimeIst } from '../../lib/format';
 import { useSession } from '../../lib/session';
@@ -49,6 +49,8 @@ export function HierarchyMeetingsCard({
   const [purpose, setPurpose] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmDates, setConfirmDates] = useState<Record<string, string>>({});
+  const [confirmTimes, setConfirmTimes] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
 
   const loadData = useCallback(async () => {
@@ -121,10 +123,31 @@ export function HierarchyMeetingsCard({
     }
   }
 
-  async function respond(id: string, accept: boolean) {
+  async function respond(m: MeetingRow, accept: boolean) {
     setBusy(true);
     try {
-      await rpc('respond_meeting_request', { p_meeting_id: id, p_accept: accept });
+      let scheduledIso: string | null = null;
+      if (accept) {
+        const defaultIst = m.scheduled_at
+          ? new Date(new Date(m.scheduled_at).getTime() + 330 * 60_000)
+          : null;
+        const dStr = confirmDates[m.id] ?? (defaultIst ? defaultIst.toISOString().slice(0, 10) : '');
+        const tStr = confirmTimes[m.id] ?? (defaultIst ? defaultIst.toISOString().slice(11, 16) : '10:30');
+        if (dStr) {
+          scheduledIso = new Date(`${dStr}T${tStr || '10:30'}:00+05:30`).toISOString();
+        }
+      }
+      await rpc('respond_meeting_request', {
+        p_meeting_id: m.id,
+        p_accept: accept,
+        p_scheduled_at: scheduledIso,
+      });
+      setFeedback({
+        text: accept
+          ? 'Meeting confirmed and synced to both calendars.'
+          : 'Meeting request declined.',
+        ok: true,
+      });
       await loadData();
     } catch (err) {
       setFeedback({ text: errorMessage(err), ok: false });
@@ -295,26 +318,43 @@ export function HierarchyMeetingsCard({
                         </Chip>
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        {isIncoming && m.kind === 'meeting_request' && m.status === 'pending' ? (
-                          <div style={{ display: 'inline-flex', gap: 6 }}>
-                            <button
-                              type="button"
-                              className="btn btn-primary field-sm"
-                              disabled={busy}
-                              onClick={() => void respond(m.id, true)}
-                            >
-                              Accept
-                            </button>
-                            <button
-                              type="button"
-                              className="btn field-sm"
-                              disabled={busy}
-                              onClick={() => void respond(m.id, false)}
-                            >
-                              Decline
-                            </button>
-                          </div>
-                        ) : (
+                        {isIncoming && m.kind === 'meeting_request' && m.status === 'pending' ? (() => {
+                          const defaultIst = m.scheduled_at
+                            ? new Date(new Date(m.scheduled_at).getTime() + 330 * 60_000)
+                            : null;
+                          const dVal = confirmDates[m.id] ?? (defaultIst ? defaultIst.toISOString().slice(0, 10) : '');
+                          const tVal = confirmTimes[m.id] ?? (defaultIst ? defaultIst.toISOString().slice(11, 16) : '10:30');
+                          return (
+                            <div style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                              <input
+                                type="date"
+                                className="field field-sm mono"
+                                value={dVal}
+                                onChange={(e) => setConfirmDates((p) => ({ ...p, [m.id]: e.target.value }))}
+                              />
+                              <TimePicker
+                                value={tVal}
+                                onChange={(next) => setConfirmTimes((p) => ({ ...p, [m.id]: next }))}
+                              />
+                              <button
+                                type="button"
+                                className="btn btn-primary field-sm"
+                                disabled={busy}
+                                onClick={() => void respond(m, true)}
+                              >
+                                Confirm & accept
+                              </button>
+                              <button
+                                type="button"
+                                className="btn field-sm"
+                                disabled={busy}
+                                onClick={() => void respond(m, false)}
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          );
+                        })() : (
                           <span style={{ fontSize: 12, color: 'var(--muted)' }}>—</span>
                         )}
                       </td>

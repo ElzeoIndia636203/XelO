@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { CalendarLinkCard } from '../../../components/CalendarLinkCard';
 import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
 import { InteractiveAcademicCalendar, type CalendarOverlayEvent } from '../../components/InteractiveAcademicCalendar';
-import { Banner, Card, Chip, Empty, ErrorNote, Loading } from '../../../components/ui';
+import { Banner, Card, Chip, Empty, ErrorNote, Loading, Modal } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { formatDateIst, todayIso } from '../../../lib/format';
 import { useLoad } from '../../../lib/hooks';
@@ -29,6 +29,27 @@ export function StudentHomePage() {
   const [classCode, setClassCode] = useState('');
   const [joinMsg, setJoinMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [busyJoin, setBusyJoin] = useState(false);
+  const [requestMeetingOpen, setRequestMeetingOpen] = useState(false);
+  const [facultyContacts, setFacultyContacts] = useState<
+    Array<{ id: string; full_name: string; email: string; role: string; relation: string }>
+  >([]);
+  const [selectedFacultyId, setSelectedFacultyId] = useState('');
+
+  async function openRequestMeetingModal() {
+    setRequestMeetingOpen(true);
+    try {
+      const rows = await rpc<
+        Array<{ id: string; full_name: string; email: string; role: string; relation: string }>
+      >('list_hierarchy_contacts', {});
+      const list = (rows ?? []).filter((c) => c.relation === 'superior' || c.role === 'faculty');
+      setFacultyContacts(list);
+      if (list.length > 0 && !list.some((c) => c.id === selectedFacultyId)) {
+        setSelectedFacultyId(list[0]!.id);
+      }
+    } catch {
+      setFacultyContacts([]);
+    }
+  }
 
   const { data, loading, error, reload } = useLoad(async () => {
     const uid = profile?.id ?? '';
@@ -196,22 +217,31 @@ export function StudentHomePage() {
             <h1 className="page-title">Home · {monthLabel}</h1>
           </div>
 
-          <form onSubmit={handleJoin} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
-            <label className="field-label">
-              Class code from your invite
-              <input
-                className="field mono"
-                required
-                value={classCode}
-                onChange={(e) => setClassCode(e.target.value)}
-                placeholder="e.g. CS7Q4K"
-                style={{ width: 170 }}
-              />
-            </label>
-            <button type="submit" className="btn btn-primary" disabled={busyJoin}>
-              {busyJoin ? 'Joining…' : 'Join'}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void openRequestMeetingModal()}
+            >
+              Request meeting with faculty
             </button>
-          </form>
+            <form onSubmit={handleJoin} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
+              <label className="field-label">
+                Class code from your invite
+                <input
+                  className="field mono"
+                  required
+                  value={classCode}
+                  onChange={(e) => setClassCode(e.target.value)}
+                  placeholder="e.g. CS7Q4K"
+                  style={{ width: 170 }}
+                />
+              </label>
+              <button type="submit" className="btn btn-primary" disabled={busyJoin}>
+                {busyJoin ? 'Joining…' : 'Join'}
+              </button>
+            </form>
+          </div>
         </div>
 
         {joinMsg ? <Banner tone={joinMsg.ok ? 'ok' : 'err'}>{joinMsg.text}</Banner> : null}
@@ -416,10 +446,53 @@ export function StudentHomePage() {
 
         <CalendarLinkCard />
         <HierarchyMeetingsCard
-          title="Request meeting with faculty"
+          title="My meeting requests"
           allowNotify={false}
           allowRequest
         />
+
+        <Modal
+          open={requestMeetingOpen}
+          title="Request meeting with faculty"
+          onClose={() => setRequestMeetingOpen(false)}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '76vh', overflowY: 'auto' }}>
+            {facultyContacts.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+                No course faculty found yet. Join a course with a class code first.
+              </div>
+            ) : (
+              <>
+                <label className="field-label">
+                  Select course faculty
+                  <select
+                    className="field"
+                    value={selectedFacultyId}
+                    onChange={(e) => setSelectedFacultyId(e.target.value)}
+                  >
+                    {facultyContacts.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.full_name} ({f.email})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {(() => {
+                  const activeFac = facultyContacts.find((f) => f.id === selectedFacultyId) ?? facultyContacts[0]!;
+                  return (
+                    <InteractiveAcademicCalendar
+                      key={activeFac.id}
+                      title={`${activeFac.full_name}'s calendar (labs, busy days & meetings)`}
+                      viewUserId={activeFac.id}
+                      viewUserLabel={activeFac.full_name}
+                      defaultRecipientId={activeFac.id}
+                    />
+                  );
+                })()}
+              </>
+            )}
+          </div>
+        </Modal>
       </div>
     </StudentShell>
   );
