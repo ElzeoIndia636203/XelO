@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { supabase } from '../../../lib/supabase';
+import { fn, supabase } from '../../../lib/supabase';
+import { Modal } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { useSession } from '../../../lib/session';
 import { ConsoleShell, type NavItem } from '../../components/ConsoleShell';
@@ -342,6 +343,38 @@ export default function HodConsole() {
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
   const [planRemark, setPlanRemark] = useState<Record<string, string>>({});
+  const [previewCourseId, setPreviewCourseId] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<{
+    course: {
+      id: string;
+      code: string;
+      title: string;
+      ltpc: string;
+      programme: string;
+      semester: string;
+      section: string;
+      academic_year: string;
+      allowed_langs: string[];
+      rubric: Record<string, number>;
+      plan_status: string;
+      plan_remark: string | null;
+      department_name: string;
+      faculty_name: string;
+      faculty_email: string;
+    };
+    outcomes: Array<{ id: string; code: string; statement: string; unit: number; btl: number }>;
+    co_po_map: Array<{ co_id: string; po_code: string; level: number }>;
+    sessions_count: number;
+  } | null>(null);
+  const [aiReviewLoading, setAiReviewLoading] = useState(false);
+  const [aiReview, setAiReview] = useState<{
+    verdict: 'approve' | 'revise';
+    summary: string;
+    strengths: string[];
+    gaps: string[];
+    suggested_remark: string;
+  } | null>(null);
   const liveTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [loading, setLoading] = useState(false);
@@ -559,6 +592,42 @@ export default function HodConsole() {
     { label: 'At risk', value: courses.reduce((a, c) => a + c.at_risk, 0) },
   ];
 
+  async function openPlanPreview(courseId: string) {
+    setPreviewCourseId(courseId);
+    setPreviewData(null);
+    setAiReview(null);
+    setPreviewLoading(true);
+    const { data, error } = await supabase.rpc('hod_course_plan_preview', { p_course_id: courseId });
+    setPreviewLoading(false);
+    if (error || !data) {
+      setErr(errorMessage(error?.message ?? 'not_found'));
+      setPreviewCourseId(null);
+      return;
+    }
+    setPreviewData(data as typeof previewData);
+  }
+
+  async function runAiPlanReview(courseId: string) {
+    setAiReviewLoading(true);
+    setErr('');
+    try {
+      const res = await fn<{
+        review: {
+          verdict: 'approve' | 'revise';
+          summary: string;
+          strengths: string[];
+          gaps: string[];
+          suggested_remark: string;
+        };
+      }>('ai-generate', { kind: 'course_plan_review', course_id: courseId });
+      setAiReview(res.review);
+    } catch (e) {
+      setErr(errorMessage(e instanceof Error ? e.message : 'ai_failed'));
+    } finally {
+      setAiReviewLoading(false);
+    }
+  }
+
   async function decidePlan(courseId: string, code: string, approve: boolean) {
     setApprovingId(courseId);
     setErr('');
@@ -574,6 +643,7 @@ export default function HodConsole() {
       setErr(errorMessage(error.message));
     } else {
       setNotice(`${code} course plan ${approve ? 'approved' : 'declined'}.`);
+      setPreviewCourseId(null);
       loadAll();
     }
   }
@@ -1152,7 +1222,28 @@ export default function HodConsole() {
                       <tr style={{ borderBottom: '1px solid var(--border)' }}>
                         <td style={{ padding: '8px 12px' }}><StatusChip status={null} kind={a.kind} /></td>
                         <td style={{ padding: '8px 12px' }}>
-                          <div style={{ fontFamily: 'var(--mono)', fontWeight: 600 }}>{a.course_code} · {a.course_title}</div>
+                          {!isFinal && a.kind === 'Course plan' ? (
+                            <button
+                              type="button"
+                              onClick={() => void openPlanPreview(a.entity_id)}
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                padding: 0,
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                fontFamily: 'var(--mono)',
+                                fontWeight: 600,
+                                color: 'var(--teal)',
+                                textDecoration: 'underline',
+                              }}
+                              title="Click to preview full course plan"
+                            >
+                              {a.course_code} · {a.course_title}
+                            </button>
+                          ) : (
+                            <div style={{ fontFamily: 'var(--mono)', fontWeight: 600 }}>{a.course_code} · {a.course_title}</div>
+                          )}
                         </td>
                         <td style={{ padding: '8px 12px', color: 'var(--muted)' }}>{a.what}</td>
                         <td style={{ padding: '8px 12px' }}><AgeLabel hours={a.age_hours} /></td>
@@ -1195,7 +1286,15 @@ export default function HodConsole() {
                                 onChange={(e) => setPlanRemark((prev) => ({ ...prev, [a.entity_id]: e.target.value }))}
                                 style={{ borderRadius: 4, border: '1px solid var(--border)', padding: '4px 8px', fontSize: '0.8rem' }}
                               />
-                              <div style={{ display: 'flex', gap: 8 }}>
+                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => void openPlanPreview(a.entity_id)}
+                                  className="btn-outline"
+                                  style={{ fontSize: '0.8rem', padding: '4px 12px' }}
+                                >
+                                  Preview & AI review
+                                </button>
                                 <button
                                   onClick={() => decidePlan(a.entity_id, a.course_code, true)}
                                   disabled={approvingId === a.entity_id}
@@ -2153,6 +2252,189 @@ export default function HodConsole() {
           </table>
         </div>
       )}
+      <Modal
+        open={Boolean(previewCourseId)}
+        title={previewData ? `Course plan preview · ${previewData.course.code} — ${previewData.course.title}` : 'Course plan preview'}
+        onClose={() => setPreviewCourseId(null)}
+      >
+        {previewLoading ? (
+          <div style={{ padding: 16, color: 'var(--muted)' }}>Loading course plan…</div>
+        ) : previewData ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, fontSize: 13, padding: 12, borderRadius: 6, background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+              <div><span style={{ color: 'var(--muted)' }}>Faculty:</span> <strong>{previewData.course.faculty_name}</strong></div>
+              <div><span style={{ color: 'var(--muted)' }}>Department:</span> <strong>{previewData.course.department_name || '—'}</strong></div>
+              <div><span style={{ color: 'var(--muted)' }}>L-T-P-C:</span> <strong className="mono">{previewData.course.ltpc}</strong></div>
+              <div><span style={{ color: 'var(--muted)' }}>Programme:</span> <strong>{previewData.course.programme} · Sem {previewData.course.semester} ({previewData.course.section})</strong></div>
+              <div><span style={{ color: 'var(--muted)' }}>Academic year:</span> <strong className="mono">{previewData.course.academic_year}</strong></div>
+              <div><span style={{ color: 'var(--muted)' }}>Languages:</span> <strong className="mono">{(previewData.course.allowed_langs ?? []).join(', ')}</strong></div>
+            </div>
+
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Course Outcomes ({previewData.outcomes.length})</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    <th style={{ textAlign: 'left', padding: '5px 8px', color: 'var(--muted)' }}>CO</th>
+                    <th style={{ textAlign: 'left', padding: '5px 8px', color: 'var(--muted)' }}>Unit</th>
+                    <th style={{ textAlign: 'left', padding: '5px 8px', color: 'var(--muted)' }}>BTL</th>
+                    <th style={{ textAlign: 'left', padding: '5px 8px', color: 'var(--muted)' }}>Statement</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewData.outcomes.map((o) => (
+                    <tr key={o.id} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                      <td className="mono" style={{ padding: '6px 8px', fontWeight: 600 }}>{o.code}</td>
+                      <td className="mono" style={{ padding: '6px 8px' }}>U{o.unit}</td>
+                      <td className="mono" style={{ padding: '6px 8px' }}>L{o.btl}</td>
+                      <td style={{ padding: '6px 8px' }}>{o.statement}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {(() => {
+              const mappedPos = Array.from(new Set(previewData.co_po_map.map((m) => m.po_code))).sort((a, b) =>
+                a.localeCompare(b, undefined, { numeric: true }),
+              );
+              const lookup = new Map(previewData.co_po_map.map((m) => [`${m.co_id}:${m.po_code}`, m.level]));
+              return mappedPos.length > 0 ? (
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>CO–PO / PSO Map</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                          <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--muted)' }}>CO</th>
+                          {mappedPos.map((po) => (
+                            <th key={po} className="mono" style={{ textAlign: 'center', padding: '4px 6px', color: 'var(--muted)' }}>{po}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewData.outcomes.map((o) => (
+                          <tr key={o.id} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                            <td className="mono" style={{ padding: '4px 8px', fontWeight: 600 }}>{o.code}</td>
+                            {mappedPos.map((po) => (
+                              <td key={po} className="mono" style={{ textAlign: 'center', padding: '4px 6px' }}>
+                                {lookup.get(`${o.id}:${po}`) ?? '·'}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null;
+            })()}
+
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Marking rubric (50 raw, reported /100)</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 12 }}>
+                {[
+                  ['Attendance', previewData.course.rubric.att ?? 0],
+                  ['Pre-test', previewData.course.rubric.pre ?? 0],
+                  ['Post-test', previewData.course.rubric.post ?? 0],
+                  ['Visible tests', previewData.course.rubric.vis ?? 0],
+                  ['Hidden tests', previewData.course.rubric.hid ?? 0],
+                  ['Viva', previewData.course.rubric.viva ?? 0],
+                ].map(([label, val]) => (
+                  <span key={String(label)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                    {label}: <strong className="mono">{val}</strong>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ padding: 12, borderRadius: 8, border: '1px solid #f59e0b', background: '#fffbeb', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: '#92400e' }}>Assist review</div>
+                <button
+                  type="button"
+                  className="btn field-sm"
+                  disabled={aiReviewLoading}
+                  onClick={() => void runAiPlanReview(previewData.course.id)}
+                >
+                  {aiReviewLoading ? 'Reviewing with Assist…' : 'Review with Assist'}
+                </button>
+              </div>
+              {aiReview ? (
+                <div style={{ fontSize: 12.5, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div>
+                    <strong>Verdict:</strong>{' '}
+                    <span style={{ fontWeight: 600, color: aiReview.verdict === 'approve' ? '#15803d' : '#b45309' }}>
+                      {aiReview.verdict === 'approve' ? 'Ready to approve' : 'Revisions suggested'}
+                    </span>{' '}
+                    — {aiReview.summary}
+                  </div>
+                  {aiReview.strengths.length > 0 ? (
+                    <div><strong>Strengths:</strong> {aiReview.strengths.join(' · ')}</div>
+                  ) : null}
+                  {aiReview.gaps.length > 0 ? (
+                    <div><strong>Gaps / suggestions:</strong> {aiReview.gaps.join(' · ')}</div>
+                  ) : null}
+                  {aiReview.suggested_remark ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span><strong>Suggested remark:</strong> {aiReview.suggested_remark}</span>
+                      <button
+                        type="button"
+                        className="btn field-sm"
+                        onClick={() =>
+                          setPlanRemark((prev) => ({
+                            ...prev,
+                            [previewData.course.id]: aiReview.suggested_remark,
+                          }))
+                        }
+                      >
+                        Use as decline remark
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: '#92400e' }}>
+                  Click &ldquo;Review with Assist&rdquo; to check CO clarity, Bloom level progression, CO–PO coverage, and rubric compliance.
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+              <input
+                type="text"
+                className="field"
+                placeholder="Remark (required to decline)"
+                value={planRemark[previewData.course.id] ?? ''}
+                onChange={(e) =>
+                  setPlanRemark((prev) => ({ ...prev, [previewData.course.id]: e.target.value }))
+                }
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button type="button" className="btn" onClick={() => setPreviewCourseId(null)}>
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={approvingId === previewData.course.id}
+                  onClick={() => void decidePlan(previewData.course.id, previewData.course.code, false)}
+                >
+                  Decline with remarks
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={approvingId === previewData.course.id}
+                  onClick={() => void decidePlan(previewData.course.id, previewData.course.code, true)}
+                >
+                  {approvingId === previewData.course.id ? 'Approving…' : 'Approve course plan'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </ConsoleShell>
   );
 }

@@ -514,3 +514,31 @@ export function validateInstantBucketDraft(
 
   return out;
 }
+
+export interface CoursePlanReviewDraft {
+  verdict: 'approve' | 'revise';
+  summary: string;
+  strengths: string[];
+  gaps: string[];
+  suggested_remark: string;
+}
+
+export function validateCoursePlanReviewDraft(raw: unknown): CoursePlanReviewDraft {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('invalid_ai_shape');
+  }
+  const obj = raw as Record<string, unknown>;
+  const verdict = obj.verdict === 'revise' ? 'revise' : 'approve';
+  const summary = typeof obj.summary === 'string' ? obj.summary.trim() : '';
+  const strengths = Array.isArray(obj.strengths)
+    ? obj.strengths.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim())
+    : [];
+  const gaps = Array.isArray(obj.gaps)
+    ? obj.gaps.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim())
+    : [];
+  const suggested_remark = typeof obj.suggested_remark === 'string' ? obj.suggested_remark.trim() : '';
+  if (!summary) {
+    throw new Error('invalid_ai_shape');
+  }
+  return { verdict, summary, strengths, gaps, suggested_remark };
+}

@@ -3,6 +3,7 @@ import {
   validateAnnouncementDraft,
   validateBankDraft,
   validateClassTaskDraft,
+  validateCoursePlanReviewDraft,
   validateFeedbackLoopDraft,
   validateInstantBucketDraft,
   validateLabCandidatesDraft,
@@ -73,6 +74,10 @@ const BodySchema = z.discriminatedUnion('kind', [
     hidden_count: z.number().int().min(1).max(10),
     avoid_titles: z.array(z.string()).max(60).optional(),
   }),
+  z.object({
+    kind: z.literal('course_plan_review'),
+    course_id: z.string().uuid(),
+  }),
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -101,7 +106,7 @@ Deno.serve(async (req: Request) => {
   const admin = adminClient();
   const { data: course } = await admin
     .from('courses')
-    .select('id, code, title, faculty_id, institution_id, department_id, allowed_langs')
+    .select('id, code, title, faculty_id, institution_id, department_id, allowed_langs, rubric, approval_hod_ids')
     .eq('id', parsed.data.course_id)
     .single();
 
@@ -110,19 +115,26 @@ Deno.serve(async (req: Request) => {
   }
 
   let authorized = course.faculty_id === authData.user.id;
-  if (!authorized && parsed.data.kind === 'feedback_loop') {
+  if (!authorized && (parsed.data.kind === 'feedback_loop' || parsed.data.kind === 'course_plan_review')) {
     const { data: callerProf } = await admin
       .from('profiles')
-      .select('role, roles, institution_id, department_id, active')
+      .select('role, roles, institution_id, department_id, hod_department_id, active')
       .eq('id', authData.user.id)
       .single();
     if (callerProf && callerProf.active) {
       const rolesList = Array.isArray(callerProf.roles) ? callerProf.roles : [callerProf.role];
+      const hodDept = (callerProf as { hod_department_id?: string | null }).hod_department_id ?? callerProf.department_id;
+      const approvalHods = Array.isArray((course as { approval_hod_ids?: string[] }).approval_hod_ids)
+        ? ((course as { approval_hod_ids?: string[] }).approval_hod_ids ?? [])
+        : [];
       authorized =
         rolesList.includes('super_admin') ||
-        (rolesList.includes('hod') &&
-          callerProf.institution_id === course.institution_id &&
-          callerProf.department_id === course.department_id);
+        (callerProf.institution_id === course.institution_id &&
+          (rolesList.includes('dean') ||
+            rolesList.includes('coe') ||
+            rolesList.includes('vc') ||
+            (rolesList.includes('hod') &&
+              (hodDept === course.department_id || approvalHods.includes(authData.user.id)))));
     }
   }
 
@@ -297,6 +309,41 @@ Deno.serve(async (req: Request) => {
         p_actor_id: authData.user.id,
       });
       return json({ questions, run_id: runId }, 200, origin);
+    }
+
+    if (parsed.data.kind === 'course_plan_review') {
+      const [{ data: outcomes }, { data: coPoMap }] = await Promise.all([
+        admin
+          .from('course_outcomes')
+          .select('id, code, statement, unit, btl')
+          .eq('course_id', course.id)
+          .order('code'),
+        admin
+          .from('co_po_map')
+          .select('co_id, po_code, level')
+          .eq('course_id', course.id),
+      ]);
+
+      const review = await callLlmJson(
+        {
+          system:
+            'You are XeIO Assist reviewing a programming lab course plan for an HOD (NBA/NAAC compliance). Return ONLY valid JSON {"verdict":"approve"|"revise","summary":"...","strengths":["..."],"gaps":["..."],"suggested_remark":"..."}. Be concise and specific: check CO clarity & Bloom level (BTL) progression, CO-PO/PSO mapping coverage, and the 50-mark rubric.',
+          user: `Course: ${course.code} ${course.title}\nAllowed languages: ${JSON.stringify(course.allowed_langs)}\nRubric: ${JSON.stringify((course as { rubric?: unknown }).rubric)}\nOutcomes: ${JSON.stringify(outcomes ?? [])}\nCO-PO Map: ${JSON.stringify(coPoMap ?? [])}`,
+          maxTokens: 1024,
+        },
+        validateCoursePlanReviewDraft,
+      );
+
+      await admin.from('ai_runs').update({ status: 'completed' }).eq('id', runId);
+      await admin.rpc('audit', {
+        p_action: 'ai_review_course_plan',
+        p_object_type: 'course',
+        p_object_id: course.id,
+        p_detail: { run_id: runId, verdict: review.verdict },
+        p_institution_id: course.institution_id,
+        p_actor_id: authData.user.id,
+      });
+      return json({ review, run_id: runId }, 200, origin);
     }
 
     if (parsed.data.kind === 'lab_candidates') {
