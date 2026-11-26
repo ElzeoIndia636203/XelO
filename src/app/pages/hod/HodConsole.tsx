@@ -451,7 +451,7 @@ export default function HodConsole() {
     const instId = profile?.institution_id ?? (await supabase.rpc('my_institution')).data;
     let coursesQuery = supabase
       .from('courses')
-      .select('id, code, title, department_id, faculty_id, final_status, plan_status, endsem_status, approval_hod_ids')
+      .select('id, code, title, department_id, faculty_id, final_status, plan_status, approval_hod_ids')
       .eq('institution_id', instId);
     if (hodDeptId && profile?.id) {
       coursesQuery = coursesQuery.or(`department_id.eq.${hodDeptId},approval_hod_ids.cs.{${profile.id}}`);
@@ -476,7 +476,6 @@ export default function HodConsole() {
       faculty_id: string;
       final_status: string;
       plan_status: string;
-      endsem_status: string;
     }>;
     const courseIds = typedCourses.map((c) => c.id);
 
@@ -506,7 +505,7 @@ export default function HodConsole() {
         department_name: deptNameMap.get(c.department_id) ?? '',
         final_status: c.final_status,
         plan_status: c.plan_status,
-        endsem_status: c.endsem_status,
+        endsem_status: null,
         students: st?.students ?? 0,
         sessions_total: st?.sessions_total ?? 0,
         sessions_conducted: st?.sessions_conducted ?? 0,
