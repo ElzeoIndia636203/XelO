@@ -241,21 +241,6 @@ Deno.serve(async (req: Request) => {
       return json({ draft, run_id: runId }, 200, origin);
     }
 
-    const sessionId = parsed.data.session_id;
-    const { data: session } = await admin
-      .from('sessions')
-      .select('id, course_id, n, topic, btl, co_id')
-      .eq('id', sessionId)
-      .single();
-
-    if (!session || session.course_id !== course.id) {
-      throw new Error('not_found');
-    }
-
-    const { data: coRow } = session.co_id
-      ? await admin.from('course_outcomes').select('code, statement').eq('id', session.co_id).single()
-      : { data: null };
-
     if (parsed.data.kind === 'feedback_loop') {
       const questions = await callLlmJson(
         {
@@ -345,6 +330,21 @@ Deno.serve(async (req: Request) => {
       });
       return json({ review, run_id: runId }, 200, origin);
     }
+
+    const sessionId = parsed.data.session_id;
+    const { data: session } = await admin
+      .from('sessions')
+      .select('id, course_id, n, topic, btl, co_id')
+      .eq('id', sessionId)
+      .single();
+
+    if (!session || session.course_id !== course.id) {
+      throw new Error('not_found');
+    }
+
+    const { data: coRow } = session.co_id
+      ? await admin.from('course_outcomes').select('code, statement').eq('id', session.co_id).single()
+      : { data: null };
 
     if (parsed.data.kind === 'lab_candidates') {
       const { data: existingQs } = await admin
