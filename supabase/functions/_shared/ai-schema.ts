@@ -440,3 +440,77 @@ export function validateFeedbackLoopDraft(raw: unknown): FeedbackQuestionDraft[]
   }
   return out;
 }
+
+export interface InstantBucketQuestionDraft {
+  title: string;
+  statement: string;
+  input_spec: string;
+  output_spec: string;
+  constraints: string;
+  sample_input: string;
+  sample_output: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  visible_tests: { input: string; expected: string }[];
+  hidden_tests: { input: string; expected: string }[];
+}
+
+export function validateInstantBucketDraft(
+  raw: unknown,
+  bucketSize: number,
+  visibleCount: number,
+  hiddenCount: number,
+  fallbackDifficulty: 'easy' | 'medium' | 'hard',
+): InstantBucketQuestionDraft[] {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('invalid_ai_shape');
+  }
+  const obj = raw as Record<string, unknown>;
+  if (!Array.isArray(obj.questions) || obj.questions.length < bucketSize) {
+    throw new Error('invalid_ai_shape');
+  }
+
+  const out: InstantBucketQuestionDraft[] = [];
+  for (const item of obj.questions.slice(0, bucketSize)) {
+    if (!item || typeof item !== 'object') throw new Error('invalid_ai_shape');
+    const row = item as Record<string, unknown>;
+    const title = typeof row.title === 'string' ? row.title.trim() : '';
+    const statement = typeof row.statement === 'string' ? row.statement.trim() : '';
+    const input_spec = typeof row.input_spec === 'string' ? row.input_spec.trim() : '';
+    const output_spec = typeof row.output_spec === 'string' ? row.output_spec.trim() : '';
+    const constraints = typeof row.constraints === 'string' ? row.constraints.trim() : '';
+    const rawDiff = typeof row.difficulty === 'string' ? row.difficulty.trim().toLowerCase() : fallbackDifficulty;
+    const difficulty: 'easy' | 'medium' | 'hard' =
+      rawDiff === 'easy' || rawDiff === 'medium' || rawDiff === 'hard' ? rawDiff : fallbackDifficulty;
+
+    const visible_tests = parseTests(row.visible_tests, Math.max(1, visibleCount));
+    const hidden_tests = parseTests(row.hidden_tests, Math.max(1, hiddenCount));
+
+    const sample_input =
+      typeof row.sample_input === 'string' && row.sample_input.trim()
+        ? row.sample_input
+        : visible_tests[0]!.input;
+    const sample_output =
+      typeof row.sample_output === 'string' && row.sample_output.trim()
+        ? row.sample_output
+        : visible_tests[0]!.expected;
+
+    if (title.length < 3 || statement.length < 15) {
+      throw new Error('invalid_ai_shape');
+    }
+
+    out.push({
+      title,
+      statement,
+      input_spec,
+      output_spec,
+      constraints,
+      sample_input,
+      sample_output,
+      difficulty,
+      visible_tests,
+      hidden_tests,
+    });
+  }
+
+  return out;
+}

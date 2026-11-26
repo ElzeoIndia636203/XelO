@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Card, Chip, Empty } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { formatDateTimeIst } from '../../../lib/format';
-import { supabase } from '../../../lib/supabase';
+import { fn, supabase } from '../../../lib/supabase';
 import type { Course, CourseOutcome } from '../../../lib/types';
 
 interface InstantTestCase {
@@ -12,8 +12,15 @@ interface InstantTestCase {
 
 interface InstantQuestionDraft {
   id: string;
+  slot: number;
+  variant: number;
   title: string;
   statement: string;
+  input_spec: string;
+  output_spec: string;
+  constraints: string;
+  sample_input: string;
+  sample_output: string;
   difficulty: 'easy' | 'medium' | 'hard';
   marks: number;
   co_code: string;
@@ -81,6 +88,9 @@ export function InstantTestStep({
     course.allowed_langs.length > 0 ? [...course.allowed_langs] : ['c', 'python'],
   );
   const [questions, setQuestions] = useState<InstantQuestionDraft[]>([]);
+  const [activeSlot, setActiveSlot] = useState(1);
+  const [activeVariant, setActiveVariant] = useState(1);
+  const [genProgress, setGenProgress] = useState('');
   const [tests, setTests] = useState<InstantTestRow[]>([]);
   const [attemptsByTest, setAttemptsByTest] = useState<Record<string, InstantAttemptRow[]>>({});
   const [busy, setBusy] = useState(false);
@@ -131,42 +141,96 @@ export function InstantTestStep({
     );
   }
 
-  function buildQuestionTemplates() {
+  async function generateAiBuckets() {
     if (!topic.trim()) {
-      onNotify('Enter a topic before generating question slots.', false);
+      onNotify('Enter a topic before generating question buckets.', false);
       return;
     }
+    if (visibleCount < 1 || hiddenCount < 1) {
+      onNotify('At least 1 visible and 1 hidden test case are required.', false);
+      return;
+    }
+    setBusy(true);
     const perQMarks = Number((totalMarks / Math.max(1, questionCount)).toFixed(2));
-    const diffs: Array<'easy' | 'medium' | 'hard'> = ['easy', 'medium', 'hard'];
-    const built: InstantQuestionDraft[] = Array.from({ length: questionCount }, (_, idx) => {
-      const qDiff = difficulty === 'mixed' ? diffs[idx % 3]! : difficulty;
-      return {
-        id: `q_${idx + 1}`,
-        title: `${topic.trim()} — Problem ${idx + 1}`,
-        statement: `Write a program for ${topic.trim()} (Problem ${idx + 1}, ${qDiff}). Read input from stdin and print the exact output to stdout.`,
-        difficulty: qDiff,
-        marks: perQMarks,
-        co_code: selectedCo?.code ?? 'CO1',
-        visible_marks: visibleMarks,
-        hidden_marks: hiddenMarks,
-        visible_tests: Array.from({ length: visibleCount }, (__, t) => ({
-          input: `${t + 1}`,
-          expected: `${t + 1}`,
-        })),
-        hidden_tests: Array.from({ length: hiddenCount }, (__, t) => ({
-          input: `${t + 10}`,
-          expected: `${t + 10}`,
-        })),
-      };
-    });
-    setQuestions(built);
-    onNotify(`Prepared ${built.length} question template(s). Edit statements & test cases, then publish.`, true);
+    const allBuilt: InstantQuestionDraft[] = [];
+    const avoidTitles: string[] = [];
+
+    try {
+      for (let slot = 1; slot <= questionCount; slot++) {
+        setGenProgress(`Generating 15-question AI bucket for Question ${slot} of ${questionCount}…`);
+        const res = await fn<{
+          questions: Array<{
+            title: string;
+            statement: string;
+            input_spec: string;
+            output_spec: string;
+            constraints: string;
+            sample_input: string;
+            sample_output: string;
+            difficulty: 'easy' | 'medium' | 'hard';
+            visible_tests: InstantTestCase[];
+            hidden_tests: InstantTestCase[];
+          }>;
+        }>('ai-generate', {
+          kind: 'instant_test_bucket',
+          course_id: course.id,
+          topic: topic.trim(),
+          slot,
+          bucket_size: 15,
+          difficulty,
+          co_code: selectedCo?.code ?? 'CO1',
+          visible_count: visibleCount,
+          hidden_count: hiddenCount,
+          avoid_titles: avoidTitles,
+        });
+
+        for (let vi = 0; vi < res.questions.length; vi++) {
+          const item = res.questions[vi]!;
+          avoidTitles.push(item.title);
+          allBuilt.push({
+            id: `s${slot}_v${vi + 1}`,
+            slot,
+            variant: vi + 1,
+            title: item.title,
+            statement: item.statement,
+            input_spec: item.input_spec,
+            output_spec: item.output_spec,
+            constraints: item.constraints,
+            sample_input: item.sample_input,
+            sample_output: item.sample_output,
+            difficulty: item.difficulty,
+            marks: perQMarks,
+            co_code: selectedCo?.code ?? 'CO1',
+            visible_marks: visibleMarks,
+            hidden_marks: hiddenMarks,
+            visible_tests: item.visible_tests,
+            hidden_tests: item.hidden_tests,
+          });
+        }
+      }
+      setQuestions(allBuilt);
+      setActiveSlot(1);
+      setActiveVariant(1);
+      onNotify(
+        `Generated ${questionCount} × 15 (${allBuilt.length}) AI questions with problem definitions, sample cases, and visible/hidden tests. Each student gets 1 shuffled question per slot.`,
+        true,
+      );
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setGenProgress('');
+      setBusy(false);
+    }
   }
 
   async function publishTest(e: FormEvent) {
     e.preventDefault();
     if (!topic.trim() || questions.length === 0) {
-      onNotify('Enter a topic and prepare at least one question before publishing.', false);
+      onNotify('Enter a topic and generate the 15-question AI buckets before publishing.', false);
+      return;
+    }
+    if (visibleCount < 1 || hiddenCount < 1 || questions.some((q) => q.visible_tests.length < 1 || q.hidden_tests.length < 1)) {
+      onNotify('Every question must have at least 1 visible and 1 hidden test case.', false);
       return;
     }
     setBusy(true);
@@ -174,7 +238,7 @@ export function InstantTestStep({
       p_course_id: course.id,
       p_topic: topic.trim(),
       p_total_marks: totalMarks,
-      p_question_count: questions.length,
+      p_question_count: questionCount,
       p_difficulty: difficulty,
       p_co_id: selectedCo?.id ?? null,
       p_co_code: selectedCo?.code ?? '',
@@ -275,14 +339,14 @@ export function InstantTestStep({
               </select>
             </label>
             <label className="field-label">
-              Visible test cases
+              Visible test cases (min 1)
               <input
                 className="field mono"
                 type="number"
                 min={1}
                 max={10}
                 value={visibleCount}
-                onChange={(e) => setVisibleCount(Number(e.target.value))}
+                onChange={(e) => setVisibleCount(Math.max(1, Number(e.target.value)))}
               />
             </label>
             <label className="field-label">
@@ -296,14 +360,14 @@ export function InstantTestStep({
               />
             </label>
             <label className="field-label">
-              Hidden test cases
+              Hidden test cases (min 1)
               <input
                 className="field mono"
                 type="number"
-                min={0}
+                min={1}
                 max={10}
                 value={hiddenCount}
-                onChange={(e) => setHiddenCount(Number(e.target.value))}
+                onChange={(e) => setHiddenCount(Math.max(1, Number(e.target.value)))}
               />
             </label>
             <label className="field-label">
@@ -332,75 +396,119 @@ export function InstantTestStep({
             ))}
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="btn" onClick={buildQuestionTemplates}>
-              Prepare {questionCount} question(s)
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button type="button" className="btn" disabled={busy} onClick={() => void generateAiBuckets()}>
+              {genProgress || `Generate ${questionCount} × 15 AI question buckets (${questionCount * 15} questions)`}
             </button>
             <button type="submit" className="btn btn-primary" disabled={busy || questions.length === 0}>
-              {busy ? 'Publishing…' : 'Publish & generate test code'}
+              {busy && !genProgress ? 'Publishing…' : 'Publish & generate test code'}
             </button>
           </div>
 
-          {questions.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
-              {questions.map((q, qi) => (
-                <div key={q.id} style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)' }}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+          {questions.length > 0 && (() => {
+            const slotQs = questions.filter((x) => x.slot === activeSlot);
+            const activeQ = slotQs.find((x) => x.variant === activeVariant) ?? slotQs[0] ?? questions[0]!;
+            const updateQ = (patch: Partial<InstantQuestionDraft>) =>
+              setQuestions((prev) => prev.map((x) => (x.id === activeQ.id ? { ...x, ...patch } : x)));
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>Question slots:</span>
+                  {Array.from({ length: questionCount }, (_, sIdx) => sIdx + 1).map((sNum) => (
+                    <button
+                      key={sNum}
+                      type="button"
+                      className={activeSlot === sNum ? 'btn btn-primary field-sm' : 'btn field-sm'}
+                      onClick={() => {
+                        setActiveSlot(sNum);
+                        setActiveVariant(1);
+                      }}
+                    >
+                      Slot {sNum} (15)
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 4 }}>Bucket variant (1–15 shuffled per student):</span>
+                  {slotQs.map((vq) => (
+                    <button
+                      key={vq.id}
+                      type="button"
+                      className={activeQ.id === vq.id ? 'btn btn-primary field-sm mono' : 'btn field-sm mono'}
+                      onClick={() => setActiveVariant(vq.variant)}
+                    >
+                      #{vq.variant}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     <input
                       className="field field-sm"
-                      style={{ flex: '1 1 220px' }}
-                      value={q.title}
-                      onChange={(e) =>
-                        setQuestions((prev) => prev.map((x, idx) => (idx === qi ? { ...x, title: e.target.value } : x)))
-                      }
+                      style={{ flex: '1 1 240px' }}
+                      value={activeQ.title}
+                      onChange={(e) => updateQ({ title: e.target.value })}
+                      placeholder="Problem title"
                     />
                     <input
                       className="field field-sm mono"
                       type="number"
                       style={{ width: 90 }}
-                      value={q.marks}
-                      onChange={(e) =>
-                        setQuestions((prev) =>
-                          prev.map((x, idx) => (idx === qi ? { ...x, marks: Number(e.target.value) } : x)),
-                        )
-                      }
+                      value={activeQ.marks}
+                      onChange={(e) => updateQ({ marks: Number(e.target.value) })}
                       title="Marks for this question"
                     />
                   </div>
-                  <textarea
-                    className="field"
-                    rows={2}
-                    value={q.statement}
-                    onChange={(e) =>
-                      setQuestions((prev) =>
-                        prev.map((x, idx) => (idx === qi ? { ...x, statement: e.target.value } : x)),
-                      )
-                    }
-                  />
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10, marginTop: 8 }}>
+                  <label className="field-label">
+                    Problem definition
+                    <textarea
+                      className="field"
+                      rows={3}
+                      value={activeQ.statement}
+                      onChange={(e) => updateQ({ statement: e.target.value })}
+                    />
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
+                    <label className="field-label">
+                      Input format
+                      <input className="field field-sm" value={activeQ.input_spec} onChange={(e) => updateQ({ input_spec: e.target.value })} />
+                    </label>
+                    <label className="field-label">
+                      Output format
+                      <input className="field field-sm" value={activeQ.output_spec} onChange={(e) => updateQ({ output_spec: e.target.value })} />
+                    </label>
+                    <label className="field-label">
+                      Constraints
+                      <input className="field field-sm" value={activeQ.constraints} onChange={(e) => updateQ({ constraints: e.target.value })} />
+                    </label>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+                    <label className="field-label">
+                      Sample input
+                      <textarea className="field field-sm mono" rows={2} value={activeQ.sample_input} onChange={(e) => updateQ({ sample_input: e.target.value })} />
+                    </label>
+                    <label className="field-label">
+                      Sample output
+                      <textarea className="field field-sm mono" rows={2} value={activeQ.sample_output} onChange={(e) => updateQ({ sample_output: e.target.value })} />
+                    </label>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>
-                        Visible tests ({q.visible_marks} marks)
+                        Visible tests ({activeQ.visible_marks} marks · min 1)
                       </div>
-                      {q.visible_tests.map((tc, ti) => (
+                      {activeQ.visible_tests.map((tc, ti) => (
                         <div key={ti} style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
                           <input
                             className="field field-sm mono"
                             placeholder="Input"
                             value={tc.input}
                             onChange={(e) =>
-                              setQuestions((prev) =>
-                                prev.map((x, idx) =>
-                                  idx === qi
-                                    ? {
-                                        ...x,
-                                        visible_tests: x.visible_tests.map((v, vi) =>
-                                          vi === ti ? { ...v, input: e.target.value } : v,
-                                        ),
-                                      }
-                                    : x,
+                              updateQ({
+                                visible_tests: activeQ.visible_tests.map((v, vi) =>
+                                  vi === ti ? { ...v, input: e.target.value } : v,
                                 ),
-                              )
+                              })
                             }
                           />
                           <input
@@ -408,18 +516,11 @@ export function InstantTestStep({
                             placeholder="Expected"
                             value={tc.expected}
                             onChange={(e) =>
-                              setQuestions((prev) =>
-                                prev.map((x, idx) =>
-                                  idx === qi
-                                    ? {
-                                        ...x,
-                                        visible_tests: x.visible_tests.map((v, vi) =>
-                                          vi === ti ? { ...v, expected: e.target.value } : v,
-                                        ),
-                                      }
-                                    : x,
+                              updateQ({
+                                visible_tests: activeQ.visible_tests.map((v, vi) =>
+                                  vi === ti ? { ...v, expected: e.target.value } : v,
                                 ),
-                              )
+                              })
                             }
                           />
                         </div>
@@ -427,27 +528,20 @@ export function InstantTestStep({
                     </div>
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>
-                        Hidden tests ({q.hidden_marks} marks)
+                        Hidden tests ({activeQ.hidden_marks} marks · min 1)
                       </div>
-                      {q.hidden_tests.map((tc, ti) => (
+                      {activeQ.hidden_tests.map((tc, ti) => (
                         <div key={ti} style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
                           <input
                             className="field field-sm mono"
                             placeholder="Input"
                             value={tc.input}
                             onChange={(e) =>
-                              setQuestions((prev) =>
-                                prev.map((x, idx) =>
-                                  idx === qi
-                                    ? {
-                                        ...x,
-                                        hidden_tests: x.hidden_tests.map((v, vi) =>
-                                          vi === ti ? { ...v, input: e.target.value } : v,
-                                        ),
-                                      }
-                                    : x,
+                              updateQ({
+                                hidden_tests: activeQ.hidden_tests.map((v, vi) =>
+                                  vi === ti ? { ...v, input: e.target.value } : v,
                                 ),
-                              )
+                              })
                             }
                           />
                           <input
@@ -455,18 +549,11 @@ export function InstantTestStep({
                             placeholder="Expected"
                             value={tc.expected}
                             onChange={(e) =>
-                              setQuestions((prev) =>
-                                prev.map((x, idx) =>
-                                  idx === qi
-                                    ? {
-                                        ...x,
-                                        hidden_tests: x.hidden_tests.map((v, vi) =>
-                                          vi === ti ? { ...v, expected: e.target.value } : v,
-                                        ),
-                                      }
-                                    : x,
+                              updateQ({
+                                hidden_tests: activeQ.hidden_tests.map((v, vi) =>
+                                  vi === ti ? { ...v, expected: e.target.value } : v,
                                 ),
-                              )
+                              })
                             }
                           />
                         </div>
@@ -474,9 +561,9 @@ export function InstantTestStep({
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+            );
+          })()}
         </form>
       </Card>
 

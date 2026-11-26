@@ -4,6 +4,7 @@ import {
   validateBankDraft,
   validateClassTaskDraft,
   validateFeedbackLoopDraft,
+  validateInstantBucketDraft,
   validateLabCandidatesDraft,
   validateOutcomesDraft,
   validateReportNarrativeDraft,
@@ -59,6 +60,18 @@ const BodySchema = z.discriminatedUnion('kind', [
     course_id: z.string().uuid(),
     co_code: z.string().min(1).max(20),
     co_statement: z.string().max(1000).optional(),
+  }),
+  z.object({
+    kind: z.literal('instant_test_bucket'),
+    course_id: z.string().uuid(),
+    topic: z.string().min(2).max(200),
+    slot: z.number().int().min(1).max(20),
+    bucket_size: z.number().int().min(1).max(15).default(15),
+    difficulty: z.enum(['easy', 'medium', 'hard', 'mixed']),
+    co_code: z.string().max(20).optional(),
+    visible_count: z.number().int().min(1).max(10),
+    hidden_count: z.number().int().min(1).max(10),
+    avoid_titles: z.array(z.string()).max(60).optional(),
   }),
 ]);
 
@@ -247,6 +260,39 @@ Deno.serve(async (req: Request) => {
         p_object_type: 'course',
         p_object_id: course.id,
         p_detail: { run_id: runId, co_code: parsed.data.co_code },
+        p_institution_id: course.institution_id,
+        p_actor_id: authData.user.id,
+      });
+
+      return json({ questions, run_id: runId }, 200, origin);
+    }
+
+    if (parsed.data.kind === 'instant_test_bucket') {
+      const bucketSize = parsed.data.bucket_size ?? 15;
+      const fallbackDiff =
+        parsed.data.difficulty === 'mixed' ? 'medium' : parsed.data.difficulty;
+      const avoid = (parsed.data.avoid_titles ?? []).slice(0, 40).join(' | ');
+      const questions = await callLlmJson(
+        {
+          system: `You are XeIO Assist. Return ONLY valid JSON {"questions":[...]}. Generate exactly ${bucketSize} distinct, well-defined programming problems for Question Slot ${parsed.data.slot}. Each problem MUST include: title, statement (clear problem definition), input_spec, output_spec, constraints, sample_input, sample_output, difficulty ("easy"|"medium"|"hard"), visible_tests (exact array of ${parsed.data.visible_count} {"input":"...","expected":"..."}), hidden_tests (exact array of ${parsed.data.hidden_count} {"input":"...","expected":"..."}). All test cases must use exact stdin/stdout.`,
+          user: `Course: ${course.code} ${course.title}\nTopic: ${parsed.data.topic}\nDifficulty: ${parsed.data.difficulty}\nCO: ${parsed.data.co_code ?? 'CO1'}\nSlot: ${parsed.data.slot}\nAvoid titles: ${avoid}`,
+          maxTokens: 8192,
+        },
+        (raw) =>
+          validateInstantBucketDraft(
+            raw,
+            bucketSize,
+            parsed.data.visible_count,
+            parsed.data.hidden_count,
+            fallbackDiff,
+          ),
+      );
+      await admin.from('ai_runs').update({ status: 'completed' }).eq('id', runId);
+      await admin.rpc('audit', {
+        p_action: 'ai_generate_instant_test_bucket',
+        p_object_type: 'course',
+        p_object_id: course.id,
+        p_detail: { run_id: runId, slot: parsed.data.slot, count: questions.length },
         p_institution_id: course.institution_id,
         p_actor_id: authData.user.id,
       });

@@ -53,7 +53,7 @@ Deno.serve(async (req: Request) => {
     }
     const { data: attempt } = await admin
       .from('instant_test_attempts')
-      .select('id, test_id, student_id, answers, submitted_at')
+      .select('id, test_id, student_id, answers, submitted_at, assigned_question_ids')
       .eq('id', attemptId)
       .single();
     if (!attempt || attempt.student_id !== authData.user.id) {
@@ -61,6 +61,10 @@ Deno.serve(async (req: Request) => {
     }
     if (attempt.submitted_at) {
       return json({ error: 'already_submitted' }, 409, origin);
+    }
+    const assignedIds = (attempt.assigned_question_ids ?? []) as string[];
+    if (assignedIds.length > 0 && !assignedIds.includes(zodRes.data.question_id)) {
+      return json({ error: 'forbidden' }, 403, origin);
     }
 
     const { data: testRow } = await admin

@@ -22,6 +22,11 @@ interface InstantAttemptPayload {
     id: string;
     title: string;
     statement: string;
+    input_spec?: string;
+    output_spec?: string;
+    constraints?: string;
+    sample_input?: string;
+    sample_output?: string;
     difficulty: 'easy' | 'medium' | 'hard';
     marks: number;
     co_code: string;
@@ -85,10 +90,13 @@ export function StudentInstantTestPage() {
       co_code: q.co_code || 'CO1',
       difficulty: q.difficulty,
       title: q.title,
-      statement: q.statement,
-      input_spec: '',
-      output_spec: '',
-      constraints: '',
+      statement:
+        q.sample_input || q.sample_output
+          ? `${q.statement}\n\nSample Input:\n${q.sample_input ?? ''}\n\nSample Output:\n${q.sample_output ?? ''}`
+          : q.statement,
+      input_spec: q.input_spec ?? '',
+      output_spec: q.output_spec ?? '',
+      constraints: q.constraints ?? '',
       starter_code: {},
       status: 'approved',
       source: 'faculty',
