@@ -335,7 +335,8 @@ export default function HodConsole() {
   const [selectedCalFacultyId, setSelectedCalFacultyId] = useState<string | null>(null);
   const [meetingTarget, setMeetingTarget] = useState<FacultyCourseStatRow | null>(null);
   const [meetingTitle, setMeetingTitle] = useState('');
-  const [meetingAt, setMeetingAt] = useState('');
+  const [meetingDate, setMeetingDate] = useState('');
+  const [meetingTime, setMeetingTime] = useState('10:30');
   const [meetingNote, setMeetingNote] = useState('');
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [remark, setRemark] = useState('');
@@ -1037,11 +1038,14 @@ export default function HodConsole() {
     if (!meetingTarget || !meetingTitle.trim()) return;
     setCalBusy(true);
     setErr('');
+    const scheduledIso = meetingDate
+      ? new Date(`${meetingDate}T${meetingTime || '10:30'}:00+05:30`).toISOString()
+      : null;
     const { error } = await supabase.rpc('send_hierarchy_message', {
       p_recipient_id: meetingTarget.faculty_id,
       p_kind: 'meeting_scheduled',
       p_title: meetingTitle.trim(),
-      p_scheduled_at: meetingAt ? new Date(meetingAt).toISOString() : null,
+      p_scheduled_at: scheduledIso,
       p_note: meetingNote.trim(),
       p_course_id: meetingTarget.course_id,
     });
@@ -1053,7 +1057,8 @@ export default function HodConsole() {
     setNotice(`Meeting scheduled with ${meetingTarget.faculty_name} (${meetingTarget.course_code}).`);
     setMeetingTarget(null);
     setMeetingTitle('');
-    setMeetingAt('');
+    setMeetingDate('');
+    setMeetingTime('10:30');
     setMeetingNote('');
   }
 
@@ -1514,12 +1519,21 @@ export default function HodConsole() {
                 />
               </label>
               <label className="field-label">
-                Date & time
+                Date
                 <input
                   className="field mono"
-                  type="datetime-local"
-                  value={meetingAt}
-                  onChange={(e) => setMeetingAt(e.target.value)}
+                  type="date"
+                  value={meetingDate}
+                  onChange={(e) => setMeetingDate(e.target.value)}
+                />
+              </label>
+              <label className="field-label">
+                Time (IST)
+                <input
+                  className="field mono"
+                  type="time"
+                  value={meetingTime}
+                  onChange={(e) => setMeetingTime(e.target.value)}
                 />
               </label>
               <label className="field-label" style={{ flex: '1 1 200px' }}>
