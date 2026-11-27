@@ -41,17 +41,34 @@ export function StudentHomePage() {
 
   async function openRequestMeetingModal() {
     setRequestMeetingOpen(true);
+    let list: Array<{ id: string; full_name: string; email: string; role: string; relation: string }>;
     try {
       const rows = await rpc<
         Array<{ id: string; full_name: string; email: string; role: string; relation: string }>
       >('list_hierarchy_contacts', {});
-      const list = (rows ?? []).filter((c) => c.relation === 'superior' || c.role === 'faculty');
-      setFacultyContacts(list);
-      if (list.length > 0 && !list.some((c) => c.id === selectedFacultyId)) {
-        setSelectedFacultyId(list[0]!.id);
-      }
+      list = (rows ?? []).filter((c) => c.relation === 'superior' || c.role === 'faculty');
     } catch {
-      setFacultyContacts([]);
+      list = [];
+    }
+    if (list.length === 0) {
+      const facultyIds = Array.from(new Set((data?.courses ?? []).map((c) => c.faculty_id).filter(Boolean)));
+      if (facultyIds.length > 0) {
+        const { data: profs } = await supabase
+          .from('profiles')
+          .select('id, full_name, email, role')
+          .in('id', facultyIds);
+        list = (profs ?? []).map((p: { id: string; full_name: string; email: string; role: string }) => ({
+          id: p.id,
+          full_name: p.full_name,
+          email: p.email,
+          role: p.role,
+          relation: 'superior',
+        }));
+      }
+    }
+    setFacultyContacts(list);
+    if (list.length > 0 && !list.some((c) => c.id === selectedFacultyId)) {
+      setSelectedFacultyId(list[0]!.id);
     }
   }
 
