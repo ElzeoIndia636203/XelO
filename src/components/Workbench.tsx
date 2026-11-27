@@ -723,8 +723,8 @@ export function Workbench({
               minHeight: 120,
               display: 'flex',
               flexDirection: 'column',
-              background: '#11110F',
-              borderTop: '1px solid #2C2B28',
+              background: '#0B1120',
+              borderTop: '1px solid #1E293B',
             }}
           >
             <div
@@ -734,14 +734,15 @@ export function Workbench({
                 padding: '0 12px',
                 height: 30,
                 alignItems: 'center',
-                borderBottom: '1px solid #2C2B28',
+                background: '#131C31',
+                borderBottom: '1px solid #1E293B',
                 fontSize: 12,
               }}
             >
-              <span style={{ color: '#E8E6DF', borderBottom: '2px solid #3FA9F5', padding: '4px 0' }}>
+              <span style={{ color: '#F1F5F9', borderBottom: '2px solid #38BDF8', padding: '4px 0' }}>
                 Console
               </span>
-              <span className="mono" style={{ color: '#8F8D85' }}>
+              <span className="mono" style={{ color: '#94A3B8' }}>
                 {activeRunOut
                   ? `${activeRunOut.mode} · ${activeRunOut.verdict}`
                   : activeLastSub
@@ -758,7 +759,7 @@ export function Workbench({
                 overflow: 'auto',
                 fontSize: 12,
                 lineHeight: 1.65,
-                color: actionErr ? '#FFB4A9' : '#CFCDC5',
+                color: actionErr ? '#FCA5A5' : '#E2E8F0',
                 whiteSpace: 'pre-wrap',
               }}
             >
