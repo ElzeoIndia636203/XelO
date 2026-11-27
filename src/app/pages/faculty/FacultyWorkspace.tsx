@@ -395,6 +395,9 @@ export function FacultyWorkspace() {
         <InstantTestStep
           course={data.course}
           outcomes={data.outcomes}
+          batches={data.batches}
+          enrollments={data.enrollments}
+          studentProfiles={data.studentProfiles}
           onNotify={(text, ok) => setNotice({ text, ok })}
         />
       ) : null}

@@ -48,6 +48,7 @@ const MESSAGES: Record<string, string> = {
   test_closed: 'The submission window for this test is closed.',
   post_test_locked: 'Pass all hidden test cases for both lab questions to unlock the post-test.',
   viva_exceeds_rubric: 'Viva marks exceed the course rubric limit.',
+  override_cannot_increase: 'Override marks cannot exceed the obtained coding marks. You may only decrease marks.',
   student_absent: 'Viva marks cannot be entered for an absent student.',
   plan_not_approved: 'Course plan must be HOD-approved before submitting final marks.',
   invalid_token: 'Calendar link is invalid or revoked. Generate a fresh link.',

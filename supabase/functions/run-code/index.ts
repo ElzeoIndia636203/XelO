@@ -72,7 +72,7 @@ Deno.serve(async (req: Request) => {
       .select('id, allowed_langs, visible_marks, hidden_marks, questions, active')
       .eq('id', attempt.test_id)
       .single();
-    if (!testRow || !testRow.active) {
+    if (!testRow || !testRow.active || (testRow.status && testRow.status !== 'active')) {
       return json({ error: 'not_found' }, 404, origin);
     }
     if (!(testRow.allowed_langs as string[]).includes(zodRes.data.lang)) {
@@ -147,16 +147,32 @@ Deno.serve(async (req: Request) => {
           visible_total: visSpecs.length,
           hidden_passed: hidPassed,
           hidden_total: hidSpecs.length,
+          visible_marks_earned: Number(visEarned.toFixed(2)),
+          hidden_marks_earned: Number(hidEarned.toFixed(2)),
           marks_awarded: marksAwarded,
         },
       };
-      const totalScore = Object.values(nextAnswers).reduce(
-        (sum, a) => sum + Number(a.marks_awarded ?? 0),
-        0,
+      const codingScore = Number(
+        Object.values(nextAnswers)
+          .reduce((sum, a) => sum + Number(a.marks_awarded ?? 0), 0)
+          .toFixed(2),
       );
+      const preScore = Number((attempt as { pretest_score?: number }).pretest_score ?? 0);
+      const vivaScore = Number((attempt as { viva_score?: number }).viva_score ?? 0);
+      const overrideScore = (attempt as { coding_override_score?: number | null }).coding_override_score;
+      const effCoding =
+        overrideScore !== null && overrideScore !== undefined
+          ? Math.min(codingScore, Number(overrideScore))
+          : codingScore;
+      const finalScore = Number((preScore + effCoding + vivaScore).toFixed(2));
       await admin
         .from('instant_test_attempts')
-        .update({ answers: nextAnswers, total_score: Number(totalScore.toFixed(2)) })
+        .update({
+          answers: nextAnswers,
+          coding_score: codingScore,
+          total_score: finalScore,
+          final_score: finalScore,
+        })
         .eq('id', attempt.id);
     }
 

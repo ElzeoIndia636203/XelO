@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { CalendarLinkCard } from '../../../components/CalendarLinkCard';
 import { HierarchyMeetingsCard } from '../../components/HierarchyMeetingsCard';
 import { InteractiveAcademicCalendar, type CalendarOverlayEvent } from '../../components/InteractiveAcademicCalendar';
 import { Banner, Card, Chip, Empty, ErrorNote, Loading, Modal } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
-import { formatDateIst, todayIso } from '../../../lib/format';
+import { formatDateIst, formatDateTimeIst, todayIso } from '../../../lib/format';
 import { useLoad } from '../../../lib/hooks';
 import { attendancePct, internalOutOf100, sessionMarks } from '../../../lib/logic/rubric';
 import { useSession } from '../../../lib/session';
@@ -26,9 +26,11 @@ import { StudentShell } from './StudentShell';
 
 export function StudentHomePage() {
   const { profile } = useSession();
+  const navigate = useNavigate();
   const [classCode, setClassCode] = useState('');
   const [joinMsg, setJoinMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [busyJoin, setBusyJoin] = useState(false);
+  const [launchingTestId, setLaunchingTestId] = useState<string | null>(null);
   const [requestMeetingOpen, setRequestMeetingOpen] = useState(false);
   const [facultyContacts, setFacultyContacts] = useState<
     Array<{ id: string; full_name: string; email: string; role: string; relation: string }>
@@ -59,7 +61,7 @@ export function StudentHomePage() {
     const courseIds = Array.from(new Set(enrollments.map((e) => e.course_id)));
     const batchIds = Array.from(new Set(enrollments.map((e) => e.batch_id)));
 
-    const [courses, batches, sessions, submissions, attempts, attendance, vivas] =
+    const [courses, batches, sessions, submissions, attempts, attendance, vivas, classTasks, instantTests] =
       courseIds.length > 0
         ? await Promise.all([
             fetchAll<Course>((from, to) =>
@@ -83,8 +85,38 @@ export function StudentHomePage() {
             fetchAll<VivaRow>((from, to) =>
               supabase.from('viva').select('*').eq('student_id', uid).range(from, to),
             ),
+            fetchAll<{ id: string; course_id: string; title: string; due_at: string | null; kind: string }>((from, to) =>
+              supabase
+                .from('class_posts')
+                .select('id, course_id, title, due_at, kind')
+                .in('course_id', courseIds)
+                .not('due_at', 'is', null)
+                .order('due_at')
+                .range(from, to),
+            ),
+            rpc<
+              Array<{
+                test_id: string;
+                course_id: string;
+                course_code: string;
+                course_title: string;
+                test_code: string;
+                topic: string;
+                total_marks: number;
+                pretest_count: number;
+                viva_marks: number;
+                status: string;
+                active: boolean;
+                scheduled_at: string | null;
+                attendance_status: string;
+                attempt_id: string | null;
+                submitted_at: string | null;
+                final_score: number | null;
+                marks_approved: boolean;
+              }>
+            >('student_list_instant_tests').catch(() => []),
           ])
-        : [[], [], [], [], [], [], []];
+        : [[], [], [], [], [], [], [], [], []];
 
     const sessionIds = sessions.map((s) => s.id);
     const [sessionQuestions, sessionRuns] =
@@ -108,6 +140,8 @@ export function StudentHomePage() {
       attempts,
       attendance,
       vivas,
+      classTasks,
+      instantTests,
       sessionQuestions,
       sessionRuns,
     };
@@ -247,6 +281,143 @@ export function StudentHomePage() {
         {joinMsg ? <Banner tone={joinMsg.ok ? 'ok' : 'err'}>{joinMsg.text}</Banner> : null}
         {error ? <ErrorNote message={error} /> : null}
         {loading && !data ? <Loading label="Loading student courses…" /> : null}
+
+        {data && (data.instantTests.length > 0 || activeSessions.length > 0 || data.classTasks.length > 0) ? (
+          <Card title="Assessment & submission notifications">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {data.instantTests.map((t) => {
+                const isLive = t.status === 'active' && t.active;
+                return (
+                  <button
+                    key={t.test_id}
+                    type="button"
+                    disabled={launchingTestId === t.test_id}
+                    onClick={async () => {
+                      if (t.attempt_id) {
+                        navigate(`/student/instant/${t.attempt_id}`);
+                        return;
+                      }
+                      if (!isLive) {
+                        navigate('/student/instant');
+                        return;
+                      }
+                      setLaunchingTestId(t.test_id);
+                      try {
+                        const res = await rpc<{ attempt_id: string }>('student_start_course_instant_test', {
+                          p_test_id: t.test_id,
+                        });
+                        navigate(`/student/instant/${res.attempt_id}`);
+                      } catch (err) {
+                        setJoinMsg({ text: errorMessage(err), ok: false });
+                      } finally {
+                        setLaunchingTestId(null);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 10,
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border)',
+                      background: isLive ? 'var(--surface-alt)' : 'var(--surface)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                        {t.course_code} · Coding test: {t.topic}
+                      </div>
+                      <div className="mono" style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
+                        Code {t.test_code} · {t.total_marks} marks
+                        {t.scheduled_at ? ` · ${formatDateTimeIst(t.scheduled_at)}` : ''}
+                        {t.marks_approved && t.final_score !== null ? ` · Final: ${t.final_score}/${t.total_marks}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                      <Chip tone={isLive ? 'good' : t.status === 'scheduled' ? 'warn' : 'neutral'}>
+                        {isLive ? 'Live · Open portal' : t.status}
+                      </Chip>
+                      {t.attendance_status === 'absent' ? <Chip tone="bad">Absent</Chip> : null}
+                    </div>
+                  </button>
+                );
+              })}
+
+              {activeSessions
+                .filter((s) => s.status === 'active')
+                .map((s) => {
+                  const co = courseById.get(s.course_id);
+                  return (
+                    <Link
+                      key={s.id}
+                      to={`/student/lab/${s.id}`}
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '10px 12px',
+                        borderRadius: 6,
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface-alt)',
+                        color: 'inherit',
+                        textDecoration: 'none',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                          {co?.code ?? 'Lab'} · S{s.n}: {s.topic}
+                        </div>
+                        <div className="mono" style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
+                          {s.scheduled_date ? formatDateIst(s.scheduled_date) : 'Active lab session'}
+                        </div>
+                      </div>
+                      <Chip tone="good">Active lab · Open</Chip>
+                    </Link>
+                  );
+                })}
+
+              {data.classTasks.map((task) => {
+                const co = courseById.get(task.course_id);
+                return (
+                  <Link
+                    key={task.id}
+                    to={`/student/c/${task.course_id}/classroom`}
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border)',
+                      background: 'var(--surface)',
+                      color: 'inherit',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                        {co?.code ?? 'Course'} · {task.title}
+                      </div>
+                      <div className="mono" style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
+                        Due: {task.due_at ? formatDateTimeIst(task.due_at) : '—'}
+                      </div>
+                    </div>
+                    <Chip tone="warn">Submission due</Chip>
+                  </Link>
+                );
+              })}
+            </div>
+          </Card>
+        ) : null}
 
         {data && data.courses.length === 0 ? (
           <Empty
