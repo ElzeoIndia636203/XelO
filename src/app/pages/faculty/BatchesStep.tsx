@@ -8,6 +8,7 @@ import {
   validateRoster,
   type RosterRow,
 } from '../../../lib/logic/roster';
+import { buildRosterTemplateXlsx } from '../../../lib/logic/xlsxExport';
 import { fn, rpc, supabase } from '../../../lib/supabase';
 import type { Batch, Course, Enrollment, PendingEnrollment, Profile } from '../../../lib/types';
 
@@ -82,18 +83,16 @@ export function BatchesStep({
   }
 
   function downloadSampleTemplate() {
-    const dom = institutionDomain.replace(/^@+/, '') || 'sanjivani.edu.in';
-    const csv = [
-      'roll_no,full_name,email',
-      `2301001,Aarav Patil,aarav.patil@${dom}`,
-      `2301002,Diya Sharma,diya.sharma@${dom}`,
-      `2301003,Rohan Kulkarni,rohan.kulkarni@gmail.com`,
-    ].join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const bytes = buildRosterTemplateXlsx(institutionDomain);
+    const copy = new Uint8Array(bytes.byteLength);
+    copy.set(bytes);
+    const blob = new Blob([copy], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${course.code.toLowerCase()}-roster-template.csv`;
+    a.download = `${course.code.toLowerCase()}-roster-template.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   }

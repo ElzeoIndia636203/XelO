@@ -50,7 +50,7 @@ export function parseRosterGrid(rawRows: readonly (readonly unknown[])[]): Roste
 
   const first = cleanRows[0]!.map((h) => h.toLowerCase());
   const hasHeader =
-    first.some((h) => h.includes('roll') || h.includes('email') || h.includes('name'));
+    first.some((h) => h.includes('roll') || h.includes('prn') || h.includes('email') || h.includes('name'));
 
   let rollIdx = 0;
   let nameIdx = 1;
@@ -59,7 +59,7 @@ export function parseRosterGrid(rawRows: readonly (readonly unknown[])[]): Roste
 
   if (hasHeader) {
     startRow = 1;
-    const r = first.findIndex((h) => h.includes('roll'));
+    const r = first.findIndex((h) => h.includes('roll') || h.includes('prn'));
     const n = first.findIndex((h) => h.includes('name'));
     const e = first.findIndex((h) => h.includes('email') || h.includes('mail'));
     if (r >= 0) rollIdx = r;
