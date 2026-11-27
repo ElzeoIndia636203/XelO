@@ -71,6 +71,7 @@ export function StudentInstantTestPage() {
   const [modalAlert, setModalAlert] = useState<{ ruleId: string; msg: string } | null>(null);
   const [holdRule, setHoldRule] = useState<{ ruleId: string; msg: string } | null>(null);
   const [secondTabBlocked, setSecondTabBlocked] = useState(false);
+  const [autoSubmittedMsg, setAutoSubmittedMsg] = useState<string | null>(null);
   const [warningCount, setWarningCount] = useState(0);
   const [integrityScore, setIntegrityScore] = useState(100);
   const [faceCount, setFaceCount] = useState(1);
@@ -121,6 +122,10 @@ export function StudentInstantTestPage() {
         setWarningCount(st.warningCount);
         setIntegrityScore(st.integrityScore);
         if (!st.activeHoldRule) setHoldRule(null);
+        if (st.autoSubmitted) {
+          stopProctorStreams();
+          setAutoSubmittedMsg('Your instant coding test was automatically submitted after a 2nd proctoring breach. Only your faculty can reset it (up to 2 times).');
+        }
       },
       onFaceCountChange: setFaceCount,
       onStatusChange: setPStatus,
@@ -224,6 +229,23 @@ export function StudentInstantTestPage() {
     return (
       <main style={{ maxWidth: 560, margin: '64px auto', padding: '0 16px' }}>
         <ErrorNote message="BL-11: This assessment is already open in another tab." />
+      </main>
+    );
+  }
+
+  if (autoSubmittedMsg || payload.submitted_at) {
+    return (
+      <main style={{ maxWidth: 560, margin: '64px auto', padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Card title={`${payload.topic} (${payload.test_code})`}>
+          <Banner tone={autoSubmittedMsg ? 'err' : 'ok'}>
+            {autoSubmittedMsg || 'This assessment has been submitted.'}
+          </Banner>
+          <div style={{ marginTop: 12 }}>
+            <button type="button" className="btn btn-primary" onClick={() => navigate('/student')}>
+              Back to student home
+            </button>
+          </div>
+        </Card>
       </main>
     );
   }

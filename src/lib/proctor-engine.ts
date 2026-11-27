@@ -24,6 +24,7 @@ export interface ProctorEngineCallbacks {
     integrityScore: number;
     flagged: boolean;
     activeHoldRule: string | null;
+    autoSubmitted?: boolean;
   }) => void;
   onFaceCountChange: (faces: number) => void;
   onStatusChange: (status: {
@@ -119,7 +120,8 @@ export function useProctorEngine({
             integrity_score: number;
             flagged: boolean;
             active_hold_rule: string | null;
-            ladder_action: 'none' | 'toast' | 'modal' | 'hold';
+            auto_submitted?: boolean;
+            ladder_action: 'none' | 'toast' | 'modal' | 'hold' | 'auto_submitted';
           }>('log_proctor_event_v2', {
             p_assessment_type: assessmentType,
             p_attempt_id: attemptId,
@@ -137,9 +139,13 @@ export function useProctorEngine({
             integrityScore: res.integrity_score,
             flagged: res.flagged,
             activeHoldRule: res.active_hold_rule,
+            autoSubmitted: Boolean(res.auto_submitted),
           });
           const msg = RULE_MESSAGES[ev.ruleId] ?? ev.ruleId;
-          if (res.ladder_action === 'hold') {
+          if (res.auto_submitted || res.ladder_action === 'auto_submitted') {
+            cbRef.current.onHold(null, '');
+            cbRef.current.onModal(ev.ruleId, `2nd proctor breach (${ev.ruleId}): your test was automatically submitted.`);
+          } else if (res.ladder_action === 'hold') {
             cbRef.current.onHold(ev.ruleId, msg);
           } else if (res.ladder_action === 'modal') {
             cbRef.current.onModal(ev.ruleId, msg);

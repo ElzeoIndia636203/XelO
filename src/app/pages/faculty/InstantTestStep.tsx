@@ -59,6 +59,7 @@ interface InstantTestRow {
   scheduled_at: string | null;
   conducted_at: string | null;
   allowed_langs: string[];
+  questions?: Array<{ id?: string; title: string; statement: string; difficulty: string; marks: number }>;
   active: boolean;
   created_at: string;
 }
@@ -107,6 +108,24 @@ interface InstantAttemptRow {
   approved_at: string | null;
   submitted_at: string | null;
   started_at: string;
+  warning_count?: number;
+  integrity_score?: number;
+  reset_count?: number;
+  auto_submitted_breach?: boolean;
+  cheating_marked?: boolean;
+  ended_reason?: string | null;
+  last_heartbeat_at?: string | null;
+  active_hold_rule?: string | null;
+}
+
+interface InstantProctorEventRow {
+  id: string;
+  instant_attempt_id: string | null;
+  rule_id: string;
+  level: string;
+  detail: string;
+  duration_sec: number;
+  at: string;
 }
 
 const ALL_LANGS = [
@@ -169,6 +188,10 @@ export function InstantTestStep({
   const [tests, setTests] = useState<InstantTestRow[]>([]);
   const [attemptsByTest, setAttemptsByTest] = useState<Record<string, InstantAttemptRow[]>>({});
   const [participantsByTest, setParticipantsByTest] = useState<Record<string, InstantParticipantRow[]>>({});
+  const [proctorEvents, setProctorEvents] = useState<InstantProctorEventRow[]>([]);
+  const [viewMode, setViewMode] = useState<'dashboard' | 'create' | 'detail'>('dashboard');
+  const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<'monitor' | 'preview' | 'marks'>('monitor');
   const [busy, setBusy] = useState(false);
 
   // Modals: attendance & activate, add live students, code inspect & grade, roll-no report
@@ -427,6 +450,9 @@ export function InstantTestStep({
       setTopic('');
       setQuestions([]);
       setScheduledAt('');
+      setSelectedTestId(res.id);
+      setViewMode('detail');
+      setDetailTab('monitor');
       await reloadAll();
     } catch (err) {
       onNotify(errorMessage(err), false);
@@ -542,6 +568,42 @@ export function InstantTestStep({
     }
   }
 
+  async function resetAttempt(attemptId: string, prn: string) {
+    const reason = window.prompt(`Reason to reset attempt for ${prn} (max 2 resets allowed):`, 'Technical issue / allowed resume');
+    if (reason === null) return;
+    setBusy(true);
+    try {
+      const count = await rpc<number>('faculty_reset_instant_attempt', {
+        p_attempt_id: attemptId,
+        p_reason: reason.trim(),
+      });
+      onNotify(`Attempt reset for ${prn} (${count}/2 resets used).`, true);
+      await reloadAll();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markCheatingAndTerminate(attemptId: string, prn: string) {
+    const reason = window.prompt(`Enter cheating / misconduct reason to terminate ${prn}'s test:`);
+    if (!reason || !reason.trim()) return;
+    setBusy(true);
+    try {
+      await rpc('faculty_mark_cheating_and_terminate', {
+        p_attempt_id: attemptId,
+        p_reason: reason.trim(),
+      });
+      onNotify(`Terminated ${prn}'s attempt and recorded misconduct.`, true);
+      await reloadAll();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleTestActive(test: InstantTestRow) {
     setBusy(true);
     try {
@@ -557,9 +619,313 @@ export function InstantTestStep({
     }
   }
 
+  const selectedTest = tests.find((t) => t.id === selectedTestId) ?? null;
+
+  useEffect(() => {
+    if (viewMode !== 'detail' || !selectedTest) return;
+    const attIds = (attemptsByTest[selectedTest.id] ?? []).map((a) => a.id);
+    let alive = true;
+    const pullEvents = async () => {
+      if (attIds.length === 0) {
+        if (alive) setProctorEvents([]);
+        return;
+      }
+      const { data } = await supabase
+        .from('proctor_events')
+        .select('id, instant_attempt_id, rule_id, level, detail, duration_sec, at')
+        .in('instant_attempt_id', attIds)
+        .order('at', { ascending: false })
+        .limit(100);
+      if (alive && data) setProctorEvents(data as InstantProctorEventRow[]);
+    };
+    const initTimer = window.setTimeout(() => void pullEvents(), 0);
+    const timer = selectedTest.status === 'active'
+      ? window.setInterval(() => {
+          void pullEvents();
+          void reloadAll();
+        }, 15_000)
+      : null;
+    return () => {
+      alive = false;
+      window.clearTimeout(initTimer);
+      if (timer !== null) window.clearInterval(timer);
+    };
+  }, [viewMode, selectedTest, attemptsByTest, reloadAll]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Card title="Schedule or create instant coding test">
+      {viewMode === 'dashboard' ? (
+        <Card
+          title="Instant coding test dashboard"
+          actions={
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setViewMode('create')}
+            >
+              + Create new test
+            </button>
+          }
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 14, fontSize: 13 }}>
+            <Chip tone="neutral">{tests.length} total tests</Chip>
+            <Chip tone="good">{tests.filter((t) => t.status === 'active').length} live now</Chip>
+            <Chip tone="warn">{tests.filter((t) => t.status === 'scheduled').length} scheduled</Chip>
+            <Chip tone="neutral">{tests.filter((t) => t.status === 'finalized').length} completed</Chip>
+          </div>
+          {tests.length === 0 ? (
+            <Empty
+              title="No instant coding tests yet"
+              body='Click "+ Create new test" to set rubrics, proctoring level, target students, and questions.'
+            />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {tests.map((t) => {
+                const tAtts = attemptsByTest[t.id] ?? [];
+                return (
+                  <div
+                    key={t.id}
+                    style={{
+                      padding: 12,
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 10,
+                    }}
+                  >
+                    <div>
+                      <span className="mono" style={{ fontSize: 13, fontWeight: 700, padding: '2px 8px', background: '#DCEBE6', color: '#0E5E52', borderRadius: 4, marginRight: 8 }}>
+                        {t.test_code}
+                      </span>
+                      <strong>{t.topic}</strong> · {t.question_count} Qs · {t.total_marks} marks · {tAtts.length} attempt(s)
+                      {t.scheduled_at ? ` · ${formatDateTimeIst(t.scheduled_at)}` : ''}
+                    </div>
+                    <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Chip tone={t.status === 'active' ? 'good' : t.status === 'scheduled' ? 'warn' : 'neutral'}>
+                        {t.status}
+                      </Chip>
+                      <button
+                        type="button"
+                        className="btn btn-primary field-sm"
+                        onClick={() => {
+                          setSelectedTestId(t.id);
+                          setDetailTab('monitor');
+                          setViewMode('detail');
+                        }}
+                      >
+                        Live monitor & logs
+                      </button>
+                      <button
+                        type="button"
+                        className="btn field-sm"
+                        onClick={() => {
+                          setSelectedTestId(t.id);
+                          setDetailTab('preview');
+                          setViewMode('detail');
+                        }}
+                      >
+                        Preview
+                      </button>
+                      <button type="button" className="btn field-sm" onClick={() => setReportTest(t)}>
+                        Report
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      ) : null}
+
+      {viewMode === 'detail' && selectedTest ? (() => {
+        const dParts = participantsByTest[selectedTest.id] ?? [];
+        const dApprovedIds = new Set(
+          dParts.filter((p) => (p.approval_status ?? 'approved') === 'approved').map((p) => p.student_id),
+        );
+        const dAtts = (attemptsByTest[selectedTest.id] ?? [])
+          .filter((a) => dParts.length === 0 || dApprovedIds.has(a.student_id))
+          .slice()
+          .sort((a, b) => a.prn.localeCompare(b.prn));
+        const attMap = new Map(dAtts.map((a) => [a.id, a]));
+        return (
+          <Card
+            title={`${selectedTest.topic} (${selectedTest.test_code})`}
+            actions={
+              <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className="btn field-sm" onClick={() => setViewMode('dashboard')}>
+                  ← Back to dashboard
+                </button>
+                <button type="button" className="btn field-sm" onClick={() => setReportTest(selectedTest)}>
+                  Performance report
+                </button>
+              </div>
+            }
+          >
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={detailTab === 'monitor' ? 'btn btn-primary field-sm' : 'btn field-sm'}
+                onClick={() => setDetailTab('monitor')}
+              >
+                Live monitor & event log ({dAtts.length})
+              </button>
+              <button
+                type="button"
+                className={detailTab === 'preview' ? 'btn btn-primary field-sm' : 'btn field-sm'}
+                onClick={() => setDetailTab('preview')}
+              >
+                Preview questions & rubric
+              </button>
+              <button
+                type="button"
+                className={detailTab === 'marks' ? 'btn btn-primary field-sm' : 'btn field-sm'}
+                onClick={() => setDetailTab('marks')}
+              >
+                Marks & inspection
+              </button>
+            </div>
+
+            {detailTab === 'monitor' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                  2nd proctor breach auto-submits the attempt · Faculty may reset up to <strong>2 times</strong> per student · Marking cheating terminates immediately.
+                </div>
+                {dAtts.length === 0 ? (
+                  <Empty title="No active attempts yet" body="Students will appear here as soon as they start the test." />
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>PRN</th>
+                        <th>Student</th>
+                        <th>State</th>
+                        <th>Breaches</th>
+                        <th>Integrity</th>
+                        <th>Resets</th>
+                        <th style={{ textAlign: 'right' }}>Live actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dAtts.map((a) => {
+                        const stateLabel = a.cheating_marked
+                          ? 'Terminated (Cheating)'
+                          : a.auto_submitted_breach
+                            ? 'Auto-submitted (2nd breach)'
+                            : a.submitted_at
+                              ? 'Submitted'
+                              : 'Live';
+                        const resets = a.reset_count ?? 0;
+                        return (
+                          <tr key={a.id}>
+                            <td className="mono">{a.prn}</td>
+                            <td>{a.student_name}</td>
+                            <td>
+                              <Chip tone={a.cheating_marked || a.auto_submitted_breach ? 'bad' : a.submitted_at ? 'good' : 'warn'}>
+                                {stateLabel}
+                              </Chip>
+                            </td>
+                            <td className="mono">{a.warning_count ?? 0}/2</td>
+                            <td className="mono">{Math.round(a.integrity_score ?? 100)}/100</td>
+                            <td className="mono">{resets}/2</td>
+                            <td style={{ textAlign: 'right', display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="btn field-sm"
+                                disabled={busy || resets >= 2 || Boolean(a.cheating_marked)}
+                                onClick={() => void resetAttempt(a.id, a.prn)}
+                              >
+                                Reset ({resets}/2)
+                              </button>
+                              <button
+                                type="button"
+                                className="btn field-sm"
+                                disabled={busy || Boolean(a.cheating_marked)}
+                                onClick={() => void markCheatingAndTerminate(a.id, a.prn)}
+                              >
+                                Mark cheating & terminate
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                    Event log ({proctorEvents.length})
+                  </div>
+                  {proctorEvents.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No proctor events recorded yet.</div>
+                  ) : (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>PRN</th>
+                          <th>Rule</th>
+                          <th>Level</th>
+                          <th>Detail</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {proctorEvents.map((ev) => {
+                          const att = ev.instant_attempt_id ? attMap.get(ev.instant_attempt_id) : undefined;
+                          return (
+                            <tr key={ev.id}>
+                              <td className="mono">{formatDateTimeIst(ev.at)}</td>
+                              <td className="mono">{att?.prn ?? '—'}</td>
+                              <td className="mono">{ev.rule_id}</td>
+                              <td><Chip tone={ev.level === 'S2' || ev.level === 'S3' ? 'bad' : ev.level === 'S1' ? 'warn' : 'neutral'}>{ev.level}</Chip></td>
+                              <td>{ev.detail}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {detailTab === 'preview' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
+                <div>
+                  <strong>Rubric:</strong> {selectedTest.question_count} Qs · {selectedTest.total_marks} total marks
+                  (Pre-test {selectedTest.pretest_marks}, Viva {selectedTest.viva_marks}) · CO {selectedTest.co_code || '—'}
+                </div>
+                {(selectedTest.questions ?? []).map((q, idx) => (
+                  <div key={q.id ?? idx} style={{ padding: 10, border: '1px solid var(--border)', borderRadius: 6 }}>
+                    <div style={{ fontWeight: 600 }}>#{idx + 1} · {q.title} ({q.difficulty}, {q.marks} marks)</div>
+                    <div style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--muted)' }}>{q.statement}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {detailTab === 'marks' ? (
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+                Use the main test list below or click <strong>Performance report</strong> above to inspect code, override marks (decrease-only), and submit final marks.
+              </div>
+            ) : null}
+          </Card>
+        );
+      })() : null}
+
+      {viewMode === 'create' ? (
+      <Card
+        title="Schedule or create instant coding test"
+        actions={
+          <button type="button" className="btn field-sm" onClick={() => setViewMode('dashboard')}>
+            ← Back to dashboard
+          </button>
+        }
+      >
         <form onSubmit={publishTest} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: 10 }}>
             <label className="field-label" style={{ gridColumn: 'span 2' }}>
@@ -959,6 +1325,7 @@ export function InstantTestStep({
           })()}
         </form>
       </Card>
+      ) : null}
 
       <Card title="Scheduled & live instant coding tests">
         {tests.length === 0 ? (

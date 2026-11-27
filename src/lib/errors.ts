@@ -56,6 +56,8 @@ const MESSAGES: Record<string, string> = {
   test_not_active: 'This test is not active yet.',
   marked_absent: 'You are marked absent for this test.',
   second_reviewer_required: 'A second reviewer must be selected before confirming misconduct.',
+  max_resets_reached: 'Maximum of 2 faculty resets reached for this student.',
+  cheating_terminated: 'Cannot reset an attempt that was terminated for cheating.',
   student_absent: 'Viva marks cannot be entered for an absent student.',
   plan_not_approved: 'Course plan must be HOD-approved before submitting final marks.',
   invalid_token: 'Calendar link is invalid or revoked. Generate a fresh link.',
