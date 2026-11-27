@@ -124,7 +124,11 @@ export async function runOnJudge0(
     'content-type': 'application/json',
   };
   if (cfg.apiKey) {
-    headers[cfg.authHeader ?? 'X-Auth-Token'] = cfg.apiKey;
+    const authHeader = cfg.authHeader ?? 'X-Auth-Token';
+    headers[authHeader] = cfg.apiKey;
+    if (authHeader.toLowerCase() === 'x-rapidapi-key') {
+      headers['X-RapidAPI-Host'] = new URL(cfg.baseUrl).host;
+    }
   }
 
   const payload = buildSubmissionPayload({
