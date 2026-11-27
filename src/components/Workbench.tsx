@@ -547,6 +547,7 @@ export function Workbench({
                   <div
                     key={tc.id}
                     style={{
+                      flexShrink: 0,
                       border: '1px solid #E2E0D8',
                       borderRadius: 5,
                       overflow: 'hidden',
@@ -576,6 +577,7 @@ export function Workbench({
 
               <div
                 style={{
+                  flexShrink: 0,
                   padding: 10,
                   border: '1px dashed #D6D3C9',
                   borderRadius: 5,
