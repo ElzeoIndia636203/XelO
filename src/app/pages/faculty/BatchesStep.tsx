@@ -81,6 +81,23 @@ export function BatchesStep({
     processRows(parseRosterCsv(csvText));
   }
 
+  function downloadSampleTemplate() {
+    const dom = institutionDomain.replace(/^@+/, '') || 'sanjivani.edu.in';
+    const csv = [
+      'roll_no,full_name,email',
+      `2301001,Aarav Patil,aarav.patil@${dom}`,
+      `2301002,Diya Sharma,diya.sharma@${dom}`,
+      `2301003,Rohan Kulkarni,rohan.kulkarni@gmail.com`,
+    ].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${course.code.toLowerCase()}-roster-template.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function confirmImport() {
     if (parsedRows.length === 0 || parseErrors.length > 0) return;
     setBusy(true);
@@ -417,6 +434,13 @@ export function BatchesStep({
               disabled={hasConductedSession}
               onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
             />
+            <button
+              type="button"
+              className="btn field-sm"
+              onClick={downloadSampleTemplate}
+            >
+              Download sample template (Excel / CSV)
+            </button>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
               <input
                 type="checkbox"
