@@ -395,10 +395,15 @@ export function StudentHomePage() {
         {error ? <ErrorNote message={error} /> : null}
         {loading && !data ? <Loading label="Loading student courses…" /> : null}
 
-        {data && (data.instantTests.length > 0 || activeSessions.length > 0 || data.classTasks.length > 0) ? (
+        {data ? (() => {
+          const liveInstantTests = data.instantTests.filter(
+            (t) => (t.status === 'active' && t.active) || t.status === 'scheduled' || t.approval_status === 'pending',
+          );
+          if (liveInstantTests.length === 0 && activeSessions.length === 0 && data.classTasks.length === 0) return null;
+          return (
           <Card title="Assessment & submission notifications">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {data.instantTests.map((t) => {
+              {liveInstantTests.map((t) => {
                 const isLive = t.status === 'active' && t.active;
                 const approval = t.approval_status ?? 'approved';
                 const canEnter = approval === 'approved' && isLive;
@@ -439,8 +444,8 @@ export function StudentHomePage() {
                       textAlign: 'left',
                       padding: '10px 12px',
                       borderRadius: 6,
-                      border: '1px solid var(--border)',
-                      background: isLive ? 'var(--surface-alt)' : 'var(--surface)',
+                      border: canEnter ? '1.5px solid #16A34A' : '1px solid var(--border)',
+                      background: canEnter ? 'rgba(22, 163, 74, 0.08)' : 'var(--surface)',
                       cursor: 'pointer',
                     }}
                   >
@@ -539,7 +544,8 @@ export function StudentHomePage() {
               })}
             </div>
           </Card>
-        ) : null}
+          );
+        })() : null}
 
         {data && data.courses.length === 0 ? (
           <Empty
@@ -699,6 +705,45 @@ export function StudentHomePage() {
                   ))}
                 </div>
               )}
+            </Card>
+
+            <Card title="Previous tests">
+              {(() => {
+                const prevTests = (data?.instantTests ?? []).filter(
+                  (t) => !(t.status === 'active' && t.active) && t.status !== 'scheduled' && t.approval_status !== 'pending',
+                );
+                if (prevTests.length === 0) {
+                  return <div style={{ fontSize: 12, color: 'var(--muted)' }}>No previous tests yet.</div>;
+                }
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {prevTests.map((t) => (
+                      <div
+                        key={t.test_id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 8,
+                          paddingTop: 6,
+                          borderTop: '1px solid var(--border-soft)',
+                          fontSize: 12,
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{t.course_code} · {t.topic}</div>
+                          <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
+                            Code {t.test_code} · {t.marks_approved && t.final_score !== null ? `${t.final_score}/${t.total_marks}` : `${t.total_marks} marks`}
+                          </div>
+                        </div>
+                        <Chip tone={t.approval_status === 'rejected' ? 'bad' : 'neutral'}>
+                          {t.approval_status === 'rejected' ? 'Declined' : t.status}
+                        </Chip>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </Card>
 
             <Card title="Previous semesters">
