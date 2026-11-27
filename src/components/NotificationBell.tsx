@@ -99,6 +99,25 @@ export function NotificationBell({ variant = 'light' }: { variant?: 'dark' | 'li
     setNotifications(rows);
   }
 
+  async function deleteNotification(id: string) {
+    if (!profileId) return;
+    setNotifications((prev) => prev.filter((row) => row.id !== id));
+    await supabase
+      .from('notifications')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', profileId);
+  }
+
+  async function clearAllNotifications() {
+    if (!profileId) return;
+    setNotifications([]);
+    await supabase
+      .from('notifications')
+      .delete()
+      .eq('user_id', profileId);
+  }
+
   async function openNotification(n: NotificationRow) {
     if (profileId && !n.read_at) {
       await supabase
@@ -195,55 +214,102 @@ export function NotificationBell({ variant = 'light' }: { variant?: 'dark' | 'li
             gap: 8,
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
             <strong style={{ fontSize: 13, color: '#141413' }}>Notifications</strong>
-            <button
-              type="button"
-              onClick={() => void markAllRead()}
-              disabled={unreadCount === 0}
-              style={{
-                minHeight: 28,
-                padding: '0 10px',
-                borderRadius: 4,
-                border: '1px solid #D6D3C9',
-                background: '#FBFAF7',
-                color: unreadCount === 0 ? '#8F8D85' : '#141413',
-                fontSize: 12,
-                cursor: unreadCount === 0 ? 'default' : 'pointer',
-              }}
-            >
-              Mark all read
-            </button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button
+                type="button"
+                onClick={() => void markAllRead()}
+                disabled={unreadCount === 0}
+                style={{
+                  minHeight: 28,
+                  padding: '0 8px',
+                  borderRadius: 4,
+                  border: '1px solid #D6D3C9',
+                  background: '#FBFAF7',
+                  color: unreadCount === 0 ? '#8F8D85' : '#141413',
+                  fontSize: 11.5,
+                  cursor: unreadCount === 0 ? 'default' : 'pointer',
+                }}
+              >
+                Mark all read
+              </button>
+              <button
+                type="button"
+                onClick={() => void clearAllNotifications()}
+                disabled={notifications.length === 0}
+                style={{
+                  minHeight: 28,
+                  padding: '0 8px',
+                  borderRadius: 4,
+                  border: '1px solid #D6D3C9',
+                  background: '#FBFAF7',
+                  color: notifications.length === 0 ? '#8F8D85' : '#991B1B',
+                  fontSize: 11.5,
+                  cursor: notifications.length === 0 ? 'default' : 'pointer',
+                }}
+              >
+                Clear all
+              </button>
+            </div>
           </div>
 
           {notifications.length === 0 ? (
             <div style={{ fontSize: 12, color: '#6B6A63', padding: '8px 0' }}>No notifications yet.</div>
           ) : (
-            notifications.slice(0, 8).map((n) => {
+            notifications.slice(0, 12).map((n) => {
               const hasDest = Boolean(normalizeAppRoute(n.link));
               return (
-                <button
+                <div
                   key={n.id}
-                  type="button"
-                  onClick={() => void openNotification(n)}
                   style={{
-                    textAlign: 'left',
-                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 6,
                     padding: 8,
                     borderRadius: 5,
                     border: '1px solid #EFEDE6',
                     background: n.read_at ? '#FFFFFF' : '#FFF4EC',
-                    color: '#141413',
-                    fontSize: 12,
-                    cursor: hasDest ? 'pointer' : 'default',
                   }}
                 >
-                  <div style={{ fontWeight: 600, color: '#141413' }}>{n.title}</div>
-                  {n.body ? <div style={{ marginTop: 2, color: '#3D3C38' }}>{n.body}</div> : null}
-                  <div className="mono" style={{ marginTop: 4, fontSize: 10, color: '#6B6A63' }}>
-                    {formatTimeIst(n.created_at)}
-                  </div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => void openNotification(n)}
+                    style={{
+                      flex: 1,
+                      textAlign: 'left',
+                      background: 'transparent',
+                      border: 0,
+                      padding: 0,
+                      color: '#141413',
+                      fontSize: 12,
+                      cursor: hasDest ? 'pointer' : 'default',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: '#141413' }}>{n.title}</div>
+                    {n.body ? <div style={{ marginTop: 2, color: '#3D3C38' }}>{n.body}</div> : null}
+                    <div className="mono" style={{ marginTop: 4, fontSize: 10, color: '#6B6A63' }}>
+                      {formatTimeIst(n.created_at)}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete notification ${n.title}`}
+                    title="Delete notification"
+                    onClick={() => void deleteNotification(n.id)}
+                    style={{
+                      border: 0,
+                      background: 'transparent',
+                      color: '#6B6A63',
+                      fontSize: 14,
+                      lineHeight: 1,
+                      padding: '2px 4px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               );
             })
           )}

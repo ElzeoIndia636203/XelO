@@ -327,3 +327,10 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION student_save_instant_draft(uuid, text, text, text) TO authenticated;
+
+-- Allow users to delete their own notifications
+GRANT DELETE ON TABLE public.notifications TO authenticated;
+DROP POLICY IF EXISTS notifications_delete ON public.notifications;
+CREATE POLICY notifications_delete ON public.notifications
+  FOR DELETE TO authenticated
+  USING (user_id = auth.uid());
