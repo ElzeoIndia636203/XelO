@@ -43,6 +43,7 @@ export function BatchesStep({
   const [batchEdits, setBatchEdits] = useState<
     Record<string, { slot: string; room: string; staff: string }>
   >({});
+  const [studentSearch, setStudentSearch] = useState('');
   const [busy, setBusy] = useState(false);
 
   const profileMap = new Map(studentProfiles.map((p) => [p.id, p]));
@@ -423,7 +424,23 @@ export function BatchesStep({
           body="Import a section roster above to split into batches of ≤ 65 and generate class codes."
         />
       ) : (
-        batches.map((b) => {
+        <>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <input
+              type="search"
+              className="field"
+              value={studentSearch}
+              onChange={(e) => setStudentSearch(e.target.value)}
+              placeholder="Search students by roll no, name, or email…"
+              style={{ maxWidth: 360 }}
+            />
+            {studentSearch.trim() ? (
+              <button type="button" className="btn field-sm" onClick={() => setStudentSearch('')}>
+                Clear search
+              </button>
+            ) : null}
+          </div>
+          {batches.map((b) => {
           const curEdit = batchEdits[b.id] ?? { slot: b.slot, room: b.room, staff: b.staff };
           const batchEnrolled = enrollments
             .filter((e) => e.batch_id === b.id)
@@ -446,14 +463,27 @@ export function BatchesStep({
               email: pe.email,
               joined: false,
             }));
-          const members = [...batchEnrolled, ...batchPending].sort((a, x) =>
+          const allMembers = [...batchEnrolled, ...batchPending].sort((a, x) =>
             a.roll.localeCompare(x.roll),
           );
+          const q = studentSearch.trim().toLowerCase();
+          const members = q
+            ? allMembers.filter(
+                (m) =>
+                  m.roll.toLowerCase().includes(q) ||
+                  m.name.toLowerCase().includes(q) ||
+                  m.email.toLowerCase().includes(q),
+              )
+            : allMembers;
 
           return (
             <Card
               key={b.id}
-              title={`${b.name} · ${members.length} students`}
+              title={
+                q
+                  ? `${b.name} · ${members.length} of ${allMembers.length} students`
+                  : `${b.name} · ${allMembers.length} students`
+              }
               actions={<Chip tone="neutral">Code: {b.class_code}</Chip>}
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -561,11 +591,14 @@ export function BatchesStep({
                       </tbody>
                     </table>
                   </div>
+                ) : q ? (
+                  <p style={{ fontSize: 13, color: 'var(--muted)' }}>No matching students in this batch.</p>
                 ) : null}
               </div>
             </Card>
           );
-        })
+        })}
+        </>
       )}
     </div>
   );
