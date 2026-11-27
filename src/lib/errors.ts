@@ -69,12 +69,21 @@ const MESSAGES: Record<string, string> = {
   otp_expired: 'That sign-in code or link has expired. Request a new one.',
   'Failed to send a request to the Edge Function': 'Could not reach the backend service. Please try again.',
   'Edge Function returned a non-2xx status code': 'The AI/execution service timed out or returned an error. Please try again.',
+  'Failed to fetch': 'Could not reach the authentication server. Check your internet connection or browser tracker blocker.',
+  'NetworkError when attempting to fetch resource.': 'Could not reach the authentication server. Check your internet connection or browser tracker blocker.',
+  'Load failed': 'Could not reach the authentication server. Check your internet connection or browser tracker blocker.',
+  'Unsupported provider: provider is not enabled': 'This sign-in provider is not enabled in Supabase Auth.',
+  'Error sending magic link email': 'Could not send the sign-in email (SMTP/rate limit). Try Continue with Google or wait a moment.',
+  'Error sending confirmation mail': 'Could not send the sign-in email (SMTP/rate limit). Try Continue with Google or wait a moment.',
 };
 
 export function errorMessage(err: unknown): string {
   const raw = err instanceof Error ? err.message.trim() : String(err).trim();
   if (raw.startsWith('ai_http_') || raw.startsWith('judge_http_')) {
     return `Service returned ${raw}. Please wait a moment and try again.`;
+  }
+  if (raw.startsWith('For security purposes, you can only request this after')) {
+    return raw;
   }
   return MESSAGES[raw] ?? 'Something went wrong. Please try again.';
 }
