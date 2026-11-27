@@ -38,6 +38,9 @@ interface InstantAttemptPayload {
   pretest_answers?: Record<string, number>;
   pretest_questions?: InstantPretestQuestion[];
   final_score?: number;
+  same_duration_per_q?: boolean;
+  total_duration_minutes?: number;
+  question_durations?: number[];
   answers: Record<string, { lang?: SupportedLang; code?: string }>;
   questions: Array<{
     id: string;
@@ -81,6 +84,13 @@ export function StudentInstantTestPage() {
     screenOk: true,
     fullscreenOk: true,
   });
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [unlockedUpTo, setUnlockedUpTo] = useState(0);
+  const [lockedIndices, setLockedIndices] = useState<Set<number>>(() => new Set());
+  const [remainingSec, setRemainingSec] = useState<number | null>(null);
+  const [autoSubmitTrigger, setAutoSubmitTrigger] = useState(0);
+  const [disclaimerBreach, setDisclaimerBreach] = useState<{ ruleId: string; msg: string } | null>(null);
+  const [consentChecked, setConsentChecked] = useState(false);
 
   const loadAttempt = useCallback(async () => {
     if (!attemptId) return;
@@ -115,16 +125,27 @@ export function StudentInstantTestPage() {
         setToastMsg(`${ruleId}: ${msg}`);
         window.setTimeout(() => setToastMsg(null), 5000);
       },
-      onModal: (ruleId, msg) => setModalAlert({ ruleId, msg }),
+      onModal: (ruleId, msg) => {
+        setConsentChecked(false);
+        setDisclaimerBreach({ ruleId, msg });
+      },
       onHold: (ruleId, msg) => setHoldRule(ruleId ? { ruleId, msg } : null),
       onSecondTabBlocked: () => setSecondTabBlocked(true),
       onServerUpdate: (st) => {
         setWarningCount(st.warningCount);
         setIntegrityScore(st.integrityScore);
         if (!st.activeHoldRule) setHoldRule(null);
+        if (st.warningCount === 1 && !disclaimerBreach && !st.autoSubmitted) {
+          setConsentChecked(false);
+          setDisclaimerBreach({
+            ruleId: 'PROCTOR-WARN-1',
+            msg: 'First malpractice warning detected.',
+          });
+        }
         if (st.autoSubmitted) {
           stopProctorStreams();
-          setAutoSubmittedMsg('Your instant coding test was automatically submitted after a 2nd proctoring breach. Only your faculty can reset it (up to 2 times).');
+          void supabase.rpc('student_submit_instant_test', { p_attempt_id: payload?.attempt_id ?? '' });
+          setAutoSubmittedMsg('Your instant coding test was automatically submitted after a 2nd consecutive malpractice breach. Only your faculty can reset it (up to 2 times).');
         }
       },
       onFaceCountChange: setFaceCount,
@@ -138,6 +159,60 @@ export function StudentInstantTestPage() {
     }, 0);
     return () => clearTimeout(t);
   }, [loadAttempt]);
+
+  const activeQuestionObj = payload?.questions[activeIdx] ?? null;
+  const qDurationSec = (() => {
+    if (!payload || !activeQuestionObj) return 0;
+    if (payload.same_duration_per_q === false && Array.isArray(payload.question_durations) && payload.question_durations[activeIdx]) {
+      return Math.max(60, Number(payload.question_durations[activeIdx]) * 60);
+    }
+    const totalMin = Math.max(1, Number(payload.total_duration_minutes ?? 60));
+    return Math.max(60, Math.round((totalMin * 60) / Math.max(1, payload.questions.length)));
+  })();
+
+  const lockAndAdvance = useCallback(
+    async (idxToLock: number) => {
+      if (!payload) return;
+      setLockedIndices((prev) => new Set(prev).add(idxToLock));
+      const nextIdx = idxToLock + 1;
+      if (nextIdx < payload.questions.length) {
+        setUnlockedUpTo((prev) => Math.max(prev, nextIdx));
+        setActiveIdx(nextIdx);
+      } else {
+        await supabase.rpc('student_submit_instant_test', { p_attempt_id: payload.attempt_id });
+        stopProctorStreams();
+        setAutoSubmittedMsg('All questions completed and submitted.');
+      }
+    },
+    [payload],
+  );
+
+  // Start per-question timer when the page loads the question for the first time
+  useEffect(() => {
+    if (!secureChecked || !payload || !activeQuestionObj || payload.submitted_at || autoSubmittedMsg) return;
+    if (lockedIndices.has(activeIdx)) return;
+    const storageKey = `xeio_q_timer_${payload.attempt_id}_${activeQuestionObj.id}`;
+    let startMs = Number(window.localStorage.getItem(storageKey) || '0');
+    if (!startMs) {
+      startMs = Date.now();
+      window.localStorage.setItem(storageKey, String(startMs));
+    }
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - startMs) / 1000);
+      const left = Math.max(0, qDurationSec - elapsed);
+      setRemainingSec(left);
+      if (left <= 0) {
+        setAutoSubmitTrigger((c) => c + 1);
+        void lockAndAdvance(activeIdx);
+      }
+    };
+    const initId = window.setTimeout(tick, 0);
+    const id = window.setInterval(tick, 1000);
+    return () => {
+      window.clearTimeout(initId);
+      window.clearInterval(id);
+    };
+  }, [secureChecked, payload, activeQuestionObj, activeIdx, qDurationSec, lockedIndices, autoSubmittedMsg, lockAndAdvance]);
 
   if (loading) {
     return (
@@ -290,6 +365,52 @@ export function StudentInstantTestPage() {
         </div>
       ) : null}
 
+      {disclaimerBreach ? (
+        <div role="alertdialog" style={{ position: 'fixed', inset: 0, zIndex: 1150, background: 'rgba(11,17,32,0.88)', color: '#141413', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#FFF', padding: 22, borderRadius: 8, maxWidth: 500, width: '100%' }}>
+            <h3 style={{ margin: '0 0 8px', color: '#991B1B' }}>
+              Malpractice Warning ({disclaimerBreach.ruleId})
+            </h3>
+            <p style={{ fontSize: 13.5, margin: '0 0 10px' }}>
+              {disclaimerBreach.msg} Your current question will be auto-submitted and the next question will load.
+            </p>
+            <div style={{ padding: 10, borderRadius: 6, background: '#FEF2F2', border: '1px solid #FECACA', fontSize: 12.5, marginBottom: 12 }}>
+              <strong>Disclaimer — Do NOT do any of the following:</strong>
+              <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                <li>Do not switch browser tabs, windows, or minimize fullscreen.</li>
+                <li>Do not copy, paste, or open Developer Tools.</li>
+                <li>Do not turn off your camera, microphone, or entire-screen share.</li>
+                <li>Ensure no second person or face appears in the frame.</li>
+              </ul>
+              <div style={{ marginTop: 8, fontWeight: 600, color: '#991B1B' }}>
+                A 2nd consecutive malpractice event will automatically submit your entire exam immediately (only faculty can reset up to 2 times).
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 14, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={consentChecked}
+                onChange={(e) => setConsentChecked(e.target.checked)}
+              />
+              <span>I have read the disclaimer and consent to continue without further violations.</span>
+            </label>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!consentChecked}
+              onClick={() => {
+                setDisclaimerBreach(null);
+                setModalAlert(null);
+                setAutoSubmitTrigger((c) => c + 1);
+                void lockAndAdvance(activeIdx);
+              }}
+            >
+              Give consent & load next question
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {modalAlert ? (
         <div role="dialog" style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div style={{ background: '#FFF', padding: 20, borderRadius: 8, maxWidth: 420, width: '100%' }}>
@@ -409,6 +530,22 @@ export function StudentInstantTestPage() {
         questions={workbenchQuestions}
         initialDrafts={initialDrafts}
         initialSubmissions={[]}
+        sequentialLock
+        activeIdx={activeIdx}
+        onActiveIdxChange={setActiveIdx}
+        unlockedUpTo={unlockedUpTo}
+        lockedIndices={lockedIndices}
+        autoSubmitTrigger={autoSubmitTrigger}
+        timerLabel={
+          lockedIndices.has(activeIdx)
+            ? 'Submitted'
+            : remainingSec !== null
+              ? `Time left: ${String(Math.floor(remainingSec / 60)).padStart(2, '0')}:${String(remainingSec % 60).padStart(2, '0')}`
+              : null
+        }
+        onQuestionSubmitted={(_qId, idx) => {
+          void lockAndAdvance(idx);
+        }}
         sessionEndsLabel={`Score: ${payload.final_score ?? payload.total_score}/${payload.total_marks}`}
         onSaveDraft={async () => {}}
         onRunCompleted={loadAttempt}

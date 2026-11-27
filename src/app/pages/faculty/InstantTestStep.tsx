@@ -176,6 +176,9 @@ export function InstantTestStep({
   const [vivaMarks, setVivaMarks] = useState(0);
   const [slotDifficulties, setSlotDifficulties] = useState<Array<'easy' | 'medium' | 'hard' | 'mixed'>>(['medium', 'medium']);
   const [slotCoIds, setSlotCoIds] = useState<string[]>([outcomes[0]?.id ?? '', outcomes[0]?.id ?? '']);
+  const [sameDurationPerQ, setSameDurationPerQ] = useState(true);
+  const [totalDurationMinutes, setTotalDurationMinutes] = useState(60);
+  const [slotDurations, setSlotDurations] = useState<number[]>([30, 30]);
   const [markMatrixApproved, setMarkMatrixApproved] = useState(false);
 
   const [scopeType, setScopeType] = useState<'class' | 'batch' | 'students'>('class');
@@ -240,6 +243,14 @@ export function InstantTestStep({
   const allSlotsHaveApproved = Array.from({ length: questionCount }, (_, idx) =>
     approvedQuestions.some((q) => q.slot === idx + 1),
   ).every(Boolean);
+  const computedQuestionDurations = Array.from({ length: questionCount }, (_, idx) =>
+    sameDurationPerQ
+      ? Math.max(1, Math.round(totalDurationMinutes / Math.max(1, questionCount)))
+      : Math.max(1, Number(slotDurations[idx] ?? 30)),
+  );
+  const computedTotalDuration = sameDurationPerQ
+    ? Math.max(1, totalDurationMinutes)
+    : computedQuestionDurations.reduce((a, b) => a + b, 0);
   const computedTotalMarks = Number(
     (
       (pretestCount > 0 ? pretestMarks : 0) +
@@ -552,7 +563,8 @@ export function InstantTestStep({
     return rows;
   }
 
-  function downloadExcelTemplate() {
+  function downloadExcelTemplate(targetSlot?: number) {
+    const slotNum = targetSlot ?? activeSlot;
     const primaryLang = langs[0] ?? 'c';
     const headers = [
       'slot',
@@ -566,12 +578,13 @@ export function InstantTestStep({
       'hidden_expected_1',
       `code_${primaryLang}`,
     ];
+    const diff = questionCount > 1 ? (slotDifficulties[slotNum - 1] ?? difficulty) : difficulty;
     const sample = [
-      '1',
-      'Sum of Two Numbers',
+      String(slotNum),
+      `Q${slotNum} Sample: Sum of Two Numbers`,
       'Given two integers A and B, print their sum.',
-      'easy',
-      getSlotCo(1)?.code ?? 'CO1',
+      diff === 'mixed' ? 'medium' : diff,
+      getSlotCo(slotNum)?.code ?? 'CO1',
       '3 5',
       '8',
       '10 25',
@@ -586,12 +599,12 @@ export function InstantTestStep({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'instant_questions_template.csv';
+    a.download = targetSlot ? `q${slotNum}_bucket_sample.csv` : 'instant_questions_template.csv';
     a.click();
     URL.revokeObjectURL(url);
   }
 
-  async function handleUploadQuestions(file: File | null) {
+  async function handleUploadQuestions(file: File | null, targetSlot?: number) {
     if (!file) return;
     try {
       const perQMarks = Number((visibleMarks + hiddenMarks).toFixed(2));
@@ -630,9 +643,11 @@ export function InstantTestStep({
 
       const built: InstantQuestionDraft[] = dataRows.map((row, idx) => {
         const slotRaw = Number(getVal(row, 'slot', 'q_no', 'question_no'));
-        const slot = Number.isInteger(slotRaw) && slotRaw >= 1 && slotRaw <= questionCount
-          ? slotRaw
-          : (idx % questionCount) + 1;
+        const slot = targetSlot
+          ? targetSlot
+          : Number.isInteger(slotRaw) && slotRaw >= 1 && slotRaw <= questionCount
+            ? slotRaw
+            : (idx % questionCount) + 1;
         const vNum = questions.filter((q) => q.slot === slot).length + idx + 1;
 
         const visible: InstantTestCase[] = [];
@@ -813,6 +828,9 @@ export function InstantTestStep({
         p_posttest_difficulty: posttestDifficulty,
         p_posttest_marks: posttestCount > 0 ? posttestMarks : 0,
         p_mark_matrix_approved: markMatrixApproved,
+        p_same_duration_per_q: sameDurationPerQ,
+        p_total_duration_minutes: computedTotalDuration,
+        p_question_durations: computedQuestionDurations,
       });
       await rpc('faculty_set_proctor_config', {
         p_assessment_type: 'instant',
@@ -1717,6 +1735,76 @@ export function InstantTestStep({
           )}
 
           <div style={{ padding: 10, borderRadius: 6, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>
+                Time duration (Total: {computedTotalDuration} min)
+              </div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12.5 }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="radio"
+                    name="duration-mode"
+                    checked={sameDurationPerQ}
+                    onChange={() => setSameDurationPerQ(true)}
+                  />
+                  Same time duration for all Qs
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="radio"
+                    name="duration-mode"
+                    checked={!sameDurationPerQ}
+                    onChange={() => setSameDurationPerQ(false)}
+                  />
+                  Question-wise time duration
+                </label>
+              </div>
+            </div>
+            {sameDurationPerQ ? (
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <label className="field-label">
+                  Total time duration (minutes)
+                  <input
+                    className="field field-sm mono"
+                    type="number"
+                    min={1}
+                    max={300}
+                    value={totalDurationMinutes}
+                    onChange={(e) => setTotalDurationMinutes(Math.max(1, Number(e.target.value) || 1))}
+                    style={{ width: 130 }}
+                  />
+                </label>
+                <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 14 }}>
+                  ~{Math.max(1, Math.round(totalDurationMinutes / Math.max(1, questionCount)))} min per question (auto-submits on expiry)
+                </span>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: 8 }}>
+                {Array.from({ length: questionCount }, (_, idx) => (
+                  <label key={idx} className="field-label">
+                    Q{idx + 1} duration (min)
+                    <input
+                      className="field field-sm mono"
+                      type="number"
+                      min={1}
+                      max={180}
+                      value={slotDurations[idx] ?? 30}
+                      onChange={(e) => {
+                        const val = Math.max(1, Number(e.target.value) || 1);
+                        setSlotDurations((prev) => {
+                          const next = Array.from({ length: questionCount }, (_, i) => prev[i] ?? 30);
+                          next[idx] = val;
+                          return next;
+                        });
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ padding: 10, borderRadius: 6, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 600 }}>Target students & schedule</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
               <label className="field-label">
@@ -1877,7 +1965,7 @@ export function InstantTestStep({
                 }}
               />
             </label>
-            <button type="button" className="btn" onClick={downloadExcelTemplate}>
+            <button type="button" className="btn" onClick={() => downloadExcelTemplate()}>
               Excel template
             </button>
             <span className={approvedQuestions.length >= approveTarget && allSlotsHaveApproved ? 'chip chip-ok' : 'chip'}>
@@ -1892,7 +1980,7 @@ export function InstantTestStep({
             </button>
           </div>
 
-          {questions.length > 0 && (() => {
+          {(() => {
             const slotQs = questions.filter((x) => x.slot === activeSlot);
             const activeQ = slotQs.find((x) => x.variant === activeVariant) ?? slotQs[0] ?? null;
             const updateQ = (patch: Partial<InstantQuestionDraft>) => {
@@ -1919,6 +2007,26 @@ export function InstantTestStep({
                       </button>
                     );
                   })}
+                  <button
+                    type="button"
+                    className="btn field-sm"
+                    onClick={() => downloadExcelTemplate(activeSlot)}
+                  >
+                    Download Q{activeSlot} sample
+                  </button>
+                  <label className="btn field-sm" style={{ cursor: 'pointer', margin: 0 }}>
+                    Upload Q{activeSlot} Excel
+                    <input
+                      type="file"
+                      accept=".xlsx,.csv"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void handleUploadQuestions(file, activeSlot);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
                   {activeQ ? (
                     <>
                       <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 8 }}>Variant:</span>

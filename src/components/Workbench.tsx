@@ -60,6 +60,14 @@ export function Workbench({
   onRunCompleted,
   onOpenPostTest,
   onExit,
+  sequentialLock = false,
+  unlockedUpTo,
+  lockedIndices,
+  activeIdx,
+  onActiveIdxChange,
+  timerLabel,
+  onQuestionSubmitted,
+  autoSubmitTrigger = 0,
 }: {
   mode: 'lab' | 'preview';
   runContext?: 'lab' | 'exam' | 'instant';
@@ -77,11 +85,25 @@ export function Workbench({
   onRunCompleted?: () => void;
   onOpenPostTest?: () => void;
   onExit: () => void;
+  sequentialLock?: boolean;
+  unlockedUpTo?: number;
+  lockedIndices?: ReadonlySet<number>;
+  activeIdx?: number;
+  onActiveIdxChange?: (idx: number) => void;
+  timerLabel?: string | null;
+  onQuestionSubmitted?: (questionId: string, idx: number) => void;
+  autoSubmitTrigger?: number;
 }) {
   const isPreview = mode === 'preview';
   const langs = (allowedLangs.length > 0 ? allowedLangs : ['c']) as SupportedLang[];
 
-  const [qi, setQi] = useState(0);
+  const [internalQi, setInternalQi] = useState(0);
+  const qi = activeIdx ?? internalQi;
+  const setQi = (idx: number) => {
+    setInternalQi(idx);
+    onActiveIdxChange?.(idx);
+  };
+  const isQuestionLocked = Boolean(lockedIndices?.has(qi));
   const [langByQ, setLangByQ] = useState<Map<string, SupportedLang>>(() => new Map());
   const [codeMap, setCodeMap] = useState<Map<string, string>>(() => new Map(initialDrafts));
   const [runOutputs, setRunOutputs] = useState<Map<string, RunResponse>>(() => new Map());
@@ -176,12 +198,24 @@ export function Workbench({
       });
       setRunOutputs((prev) => new Map(prev).set(activeQ.id, res));
       onRunCompleted?.();
+      if (runMode === 'submit') {
+        onQuestionSubmitted?.(activeQ.id, qi);
+      }
     } catch (err) {
       setActionErr(errorMessage(err));
     } finally {
       setBusyMode(null);
     }
   }
+
+  const lastTriggerRef = useRef(0);
+  useEffect(() => {
+    if (autoSubmitTrigger > lastTriggerRef.current) {
+      lastTriggerRef.current = autoSubmitTrigger;
+      void execute('submit');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSubmitTrigger]);
 
   const questionStatus = (qId: string, hidTotal: number) => {
     const liveOut = runOutputs.get(qId);
@@ -272,12 +306,17 @@ export function Workbench({
             const dotColor =
               st === 'all' ? '#5FB3A1' : st === 'visible' ? '#E8A26B' : '#57554F';
             const selected = idx === qi;
+            const tabDisabled = sequentialLock && idx > (unlockedUpTo ?? 0);
             return (
               <button
                 key={item.question.id}
                 type="button"
                 aria-pressed={selected}
-                onClick={() => setQi(idx)}
+                disabled={tabDisabled}
+                title={tabDisabled ? 'Submit current question first to unlock' : undefined}
+                onClick={() => {
+                  if (!tabDisabled) setQi(idx);
+                }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -286,7 +325,8 @@ export function Workbench({
                   padding: '0 10px',
                   border: 0,
                   borderRadius: 5,
-                  cursor: 'pointer',
+                  cursor: tabDisabled ? 'not-allowed' : 'pointer',
+                  opacity: tabDisabled ? 0.45 : 1,
                   fontSize: 13,
                   background: selected ? '#2C2B28' : 'transparent',
                   color: selected ? '#FFFFFF' : '#A8A69E',
@@ -389,6 +429,22 @@ export function Workbench({
           </span>
         )}
 
+        {timerLabel ? (
+          <span
+            className="mono"
+            style={{
+              fontSize: 11.5,
+              fontWeight: 700,
+              padding: '2px 8px',
+              borderRadius: 4,
+              background: '#3A2618',
+              color: '#FFB48A',
+            }}
+          >
+            {timerLabel}
+          </span>
+        ) : null}
+
         {sessionEndsLabel ? (
           <span
             className="mono"
@@ -406,7 +462,7 @@ export function Workbench({
 
         <button
           type="button"
-          disabled={isPreview || busyMode !== null || !activeQ}
+          disabled={isPreview || isQuestionLocked || busyMode !== null || !activeQ}
           onClick={handleResetCode}
           style={{
             minHeight: 32,
@@ -416,15 +472,15 @@ export function Workbench({
             background: '#1F1F1D',
             color: '#CFCDC5',
             fontSize: 12.5,
-            cursor: isPreview ? 'not-allowed' : 'pointer',
-            opacity: isPreview ? 0.55 : 1,
+            cursor: isPreview || isQuestionLocked ? 'not-allowed' : 'pointer',
+            opacity: isPreview || isQuestionLocked ? 0.55 : 1,
           }}
         >
           Reset
         </button>
         <button
           type="button"
-          disabled={isPreview || busyMode !== null || !activeQ}
+          disabled={isPreview || isQuestionLocked || busyMode !== null || !activeQ}
           onClick={() => void execute('run')}
           style={{
             minHeight: 32,
@@ -434,15 +490,15 @@ export function Workbench({
             background: '#1F1F1D',
             color: '#E8E6DF',
             fontSize: 13,
-            cursor: isPreview ? 'not-allowed' : 'pointer',
-            opacity: isPreview ? 0.55 : 1,
+            cursor: isPreview || isQuestionLocked ? 'not-allowed' : 'pointer',
+            opacity: isPreview || isQuestionLocked ? 0.55 : 1,
           }}
         >
           {busyMode === 'run' ? 'Running…' : 'Run'}
         </button>
         <button
           type="button"
-          disabled={isPreview || busyMode !== null || !activeQ}
+          disabled={isPreview || isQuestionLocked || busyMode !== null || !activeQ}
           onClick={() => void execute('submit')}
           style={{
             minHeight: 32,
@@ -453,11 +509,11 @@ export function Workbench({
             color: '#FFFFFF',
             fontSize: 13,
             fontWeight: 600,
-            cursor: isPreview ? 'not-allowed' : 'pointer',
-            opacity: isPreview ? 0.55 : 1,
+            cursor: isPreview || isQuestionLocked ? 'not-allowed' : 'pointer',
+            opacity: isPreview || isQuestionLocked ? 0.55 : 1,
           }}
         >
-          {busyMode === 'submit' ? 'Submitting…' : 'Submit'}
+          {busyMode === 'submit' ? 'Submitting…' : isQuestionLocked ? 'Submitted' : 'Submit'}
         </button>
         <button
           type="button"
