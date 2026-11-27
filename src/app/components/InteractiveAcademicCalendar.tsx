@@ -227,10 +227,19 @@ export function InteractiveAcademicCalendar({
           }),
         )
       : [];
+    let finalContacts = (cData ?? []) as ContactOption[];
+    let finalContactsErr = cErr ? errorMessage(cErr.message) : '';
+    if (finalContacts.length === 0 && profile?.role === 'student') {
+      const { data: fbData, error: fbErr } = await supabase.rpc('student_list_course_faculty');
+      if (!fbErr && Array.isArray(fbData) && fbData.length > 0) {
+        finalContacts = fbData as ContactOption[];
+        finalContactsErr = '';
+      }
+    }
     return {
       meetings: (mData ?? []) as CalendarMeetingItem[],
-      contacts: (cData ?? []) as ContactOption[],
-      contactsErr: cErr ? errorMessage(cErr.message) : '',
+      contacts: finalContacts,
+      contactsErr: finalContactsErr,
       busyDays: (bData ?? []) as BusyDayItem[],
       sessionEvents: sessEvents,
       calPayload,

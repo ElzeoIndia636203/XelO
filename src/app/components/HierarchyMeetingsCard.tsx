@@ -64,7 +64,11 @@ export function HierarchyMeetingsCard({
         .order('created_at', { ascending: false })
         .limit(30),
     ]);
-    setContacts(cRes ?? []);
+    let contactsList = cRes ?? [];
+    if (contactsList.length === 0 && profile.role === 'student') {
+      contactsList = await rpc<ContactRow[]>('student_list_course_faculty').catch(() => [] as ContactRow[]);
+    }
+    setContacts(contactsList);
     if (!mRes.error && mRes.data) {
       setMeetings(mRes.data as MeetingRow[]);
     }
