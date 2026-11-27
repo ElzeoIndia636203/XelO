@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Card, Chip, Empty } from '../../../components/ui';
+import { Card, Chip, Empty, Modal } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { formatDateIst } from '../../../lib/format';
 import { rpc } from '../../../lib/supabase';
@@ -35,6 +35,8 @@ export function InstitutionsTab({
   const [deptSchoolId, setDeptSchoolId] = useState('');
   const [deptCode, setDeptCode] = useState('');
   const [deptName, setDeptName] = useState('');
+  const [editingInst, setEditingInst] = useState<Institution | null>(null);
+  const [editDomain, setEditDomain] = useState('');
   const [busy, setBusy] = useState(false);
 
   const activeSchoolInst = schoolInstId || institutions[0]?.id || '';
@@ -50,6 +52,30 @@ export function InstitutionsTab({
     try {
       await rpc('admin_remove_institution', { p_institution_id: inst.id });
       onNotify(`Removed ${inst.name}.`, true);
+      await onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveInstitutionDomain(e: FormEvent) {
+    e.preventDefault();
+    if (!editingInst) return;
+    const clean = editDomain.trim().replace(/^@+/, '').toLowerCase();
+    if (!clean || !clean.includes('.')) {
+      onNotify('Enter a valid domain such as university.edu.in.', false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await rpc('admin_update_institution_domain', {
+        p_institution_id: editingInst.id,
+        p_email_domain: clean,
+      });
+      onNotify(`Updated domain for ${editingInst.name} to @${clean}.`, true);
+      setEditingInst(null);
       await onRefresh();
     } catch (err) {
       onNotify(errorMessage(err), false);
@@ -295,14 +321,27 @@ export function InstitutionsTab({
                           : '—'}
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        <button
-                          type="button"
-                          className="btn field-sm"
-                          disabled={busy}
-                          onClick={() => void removeInstitution(inst)}
-                        >
-                          Remove
-                        </button>
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            disabled={busy}
+                            onClick={() => {
+                              setEditingInst(inst);
+                              setEditDomain(inst.email_domain.replace(/^@+/, ''));
+                            }}
+                          >
+                            Edit domain
+                          </button>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            disabled={busy}
+                            onClick={() => void removeInstitution(inst)}
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -365,6 +404,33 @@ export function InstitutionsTab({
           </div>
         </Card>
       ) : null}
+
+      <Modal
+        open={editingInst !== null}
+        title={editingInst ? `Edit domain · ${editingInst.name}` : 'Edit domain'}
+        onClose={() => setEditingInst(null)}
+      >
+        <form onSubmit={saveInstitutionDomain} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <label className="field-label">
+            Email domain (without @)
+            <input
+              className="field"
+              value={editDomain}
+              onChange={(e) => setEditDomain(e.target.value)}
+              placeholder="university.edu.in"
+              required
+            />
+          </label>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" className="btn" onClick={() => setEditingInst(null)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? 'Saving…' : 'Save domain'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }
