@@ -226,7 +226,7 @@ export function StudentHomePage() {
       );
       setLiveTestCode('');
       if (res.status === 'approved' && res.attempt_id) {
-        navigate(`/student/instant/${res.attempt_id}`);
+        navigate(`/student/instant-test/${res.attempt_id}`);
         return;
       }
       setJoinMsg({
@@ -410,11 +410,11 @@ export function StudentHomePage() {
                     onClick={async () => {
                       if (approval !== 'approved') return;
                       if (t.attempt_id) {
-                        navigate(`/student/instant/${t.attempt_id}`);
+                        navigate(`/student/instant-test/${t.attempt_id}`);
                         return;
                       }
                       if (!isLive) {
-                        navigate('/student/instant');
+                        setJoinMsg({ text: `Test "${t.topic}" is not active yet.`, ok: false });
                         return;
                       }
                       setLaunchingTestId(t.test_id);
@@ -422,7 +422,7 @@ export function StudentHomePage() {
                         const res = await rpc<{ attempt_id: string }>('student_start_course_instant_test', {
                           p_test_id: t.test_id,
                         });
-                        navigate(`/student/instant/${res.attempt_id}`);
+                        navigate(`/student/instant-test/${res.attempt_id}`);
                       } catch (err) {
                         setJoinMsg({ text: errorMessage(err), ok: false });
                       } finally {

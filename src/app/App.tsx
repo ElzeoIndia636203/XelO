@@ -311,6 +311,26 @@ const router = createBrowserRouter(
       ),
     },
     {
+      path: '/student/instant/:attemptId',
+      element: (
+        <RequireRole allow={['student']}>
+          <LazyWrap>
+            <StudentInstantTest />
+          </LazyWrap>
+        </RequireRole>
+      ),
+    },
+    {
+      path: '/student/instant',
+      element: (
+        <RequireRole allow={['student']}>
+          <LazyWrap>
+            <StudentHome />
+          </LazyWrap>
+        </RequireRole>
+      ),
+    },
+    {
       path: '/hod',
       element: (
         <RequireRole allow={['hod']}>
