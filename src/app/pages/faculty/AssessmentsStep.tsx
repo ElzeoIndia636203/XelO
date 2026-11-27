@@ -114,6 +114,10 @@ export function AssessmentsStep({
   const [assessment, setAssessment] = useState<AssessmentRow | null>(null);
   const [viewStage, setViewStage] = useState<StageKey>('rules');
   const [rules, setRules] = useState<AssessmentRules>(DEFAULT_ASSESSMENT_RULES);
+  const [proctorLevel, setProctorLevel] = useState<1 | 2 | 3>(2);
+  const [proctorCamera, setProctorCamera] = useState(false);
+  const [proctorMic, setProctorMic] = useState(false);
+  const [proctorReason, setProctorReason] = useState('Standard lab environment (Moderate default)');
   const [selectedCos, setSelectedCos] = useState<string[]>(() => outcomes.map((o) => o.id));
   const [candidates, setCandidates] = useState<CandidateRow[]>([]);
   const [schedDate, setSchedDate] = useState('2026-12-10T10:00');
@@ -230,20 +234,41 @@ export function AssessmentsStep({
       onNotify(ruleErrs[0]!, false);
       return;
     }
+    if (proctorLevel < 3 && !proctorReason.trim()) {
+      onNotify('Enter a reason for choosing Level 1 or Level 2 proctoring on End-Sem (shown to HOD).', false);
+      return;
+    }
     setBusy(true);
-    const { error } = await supabase.rpc('create_assessment', {
+    const { data: createdId, error } = await supabase.rpc('create_assessment', {
       p_course_id: course.id,
       p_batch_id: batchId,
       p_rules: rules,
       p_cos: selectedCos,
     });
-    setBusy(false);
     if (error) {
+      setBusy(false);
       onNotify(errorMessage(error), false);
-    } else {
-      onNotify('Assessment rules saved.', true);
-      await loadAssessment();
+      return;
     }
+    const targetId = (createdId as string | null) ?? assessment?.id;
+    if (targetId) {
+      const { error: pe } = await supabase.rpc('faculty_set_proctor_config', {
+        p_assessment_type: 'endsem',
+        p_assessment_id: targetId,
+        p_level: proctorLevel,
+        p_camera: proctorLevel === 3 ? true : proctorLevel === 2 ? proctorCamera : false,
+        p_microphone: proctorLevel === 3 ? true : proctorLevel === 2 ? proctorMic : false,
+        p_reason: proctorReason.trim(),
+      });
+      if (pe) {
+        setBusy(false);
+        onNotify(errorMessage(pe), false);
+        return;
+      }
+    }
+    setBusy(false);
+    onNotify('Assessment rules and proctoring level saved.', true);
+    await loadAssessment();
   }
 
   async function handleGenerate40() {
@@ -618,6 +643,60 @@ export function AssessmentsStep({
                 </label>
               ))}
             </div>
+          </div>
+
+          <div style={{ padding: 12, borderRadius: 6, border: '1px solid var(--border)', marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Proctoring level (shown to HOD)</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+              <label style={{ fontSize: 13 }}>
+                Level
+                <select
+                  disabled={assessment?.rules_locked}
+                  value={proctorLevel}
+                  onChange={(e) => {
+                    const lvl = Number(e.target.value) as 1 | 2 | 3;
+                    setProctorLevel(lvl);
+                    if (lvl === 3) {
+                      setProctorCamera(true);
+                      setProctorMic(true);
+                    } else if (lvl === 1) {
+                      setProctorCamera(false);
+                      setProctorMic(false);
+                    }
+                  }}
+                  style={{ display: 'block', marginTop: 4, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6 }}
+                >
+                  <option value={2}>Level 2 · Moderate (Default)</option>
+                  <option value={1}>Level 1 · Minimum (Lockdown only)</option>
+                  <option value={3}>Level 3 · High (Cam + Mic + Screen)</option>
+                </select>
+              </label>
+              {proctorLevel === 2 ? (
+                <>
+                  <label style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 18 }}>
+                    <input type="checkbox" disabled={assessment?.rules_locked} checked={proctorCamera} onChange={(e) => setProctorCamera(e.target.checked)} />
+                    Camera + AI rules
+                  </label>
+                  <label style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 18 }}>
+                    <input type="checkbox" disabled={assessment?.rules_locked} checked={proctorMic} onChange={(e) => setProctorMic(e.target.checked)} />
+                    Microphone + audio rules
+                  </label>
+                </>
+              ) : null}
+            </div>
+            {proctorLevel < 3 ? (
+              <label style={{ fontSize: 13 }}>
+                Reason for Level {proctorLevel} (required for HOD approval)
+                <input
+                  type="text"
+                  disabled={assessment?.rules_locked}
+                  value={proctorReason}
+                  onChange={(e) => setProctorReason(e.target.value)}
+                  placeholder="e.g. Lab desktops without webcams"
+                  style={{ display: 'block', width: '100%', marginTop: 4, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6 }}
+                />
+              </label>
+            ) : null}
           </div>
 
           <div style={{ padding: 12, borderRadius: 6, background: 'var(--bg)', fontSize: 13, marginBottom: 16 }}>

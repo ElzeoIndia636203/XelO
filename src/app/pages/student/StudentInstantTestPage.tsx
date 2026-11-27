@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { ProctorBar } from '../../../components/ProctorBar';
+import { SecureCheckPanel } from '../../../components/SecureCheckPanel';
 import { Banner, Card, Chip, ErrorNote, Loading } from '../../../components/ui';
 import { Workbench, type WorkbenchQuestion } from '../../../components/Workbench';
 import { errorMessage } from '../../../lib/errors';
+import {
+  defaultProctorConfig,
+  resolveEffectiveRules,
+  type ProctorConfig,
+} from '../../../lib/logic/proctor';
 import type { SupportedLang } from '../../../lib/logic/starters';
+import { useProctorEngine } from '../../../lib/proctor-engine';
+import { requestEntireScreenShare, requestExamFullscreen, stopProctorStreams } from '../../../lib/proctor-runtime';
 import { rpc, supabase } from '../../../lib/supabase';
 
 interface InstantPretestQuestion {
@@ -56,6 +65,21 @@ export function StudentInstantTestPage() {
   const [preChoices, setPreChoices] = useState<Record<string, number>>({});
   const [busyPre, setBusyPre] = useState(false);
   const [preMsg, setPreMsg] = useState<string | null>(null);
+  const [proctorConfig, setProctorConfig] = useState<ProctorConfig>(() => defaultProctorConfig(2));
+  const [secureChecked, setSecureChecked] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [modalAlert, setModalAlert] = useState<{ ruleId: string; msg: string } | null>(null);
+  const [holdRule, setHoldRule] = useState<{ ruleId: string; msg: string } | null>(null);
+  const [secondTabBlocked, setSecondTabBlocked] = useState(false);
+  const [warningCount, setWarningCount] = useState(0);
+  const [integrityScore, setIntegrityScore] = useState(100);
+  const [faceCount, setFaceCount] = useState(1);
+  const [pStatus, setPStatus] = useState({
+    cameraOk: true,
+    micOk: true,
+    screenOk: true,
+    fullscreenOk: true,
+  });
 
   const loadAttempt = useCallback(async () => {
     if (!attemptId) return;
@@ -67,9 +91,41 @@ export function StudentInstantTestPage() {
       setLoading(false);
       return;
     }
-    setPayload(data as InstantAttemptPayload);
+    const p = data as InstantAttemptPayload;
+    setPayload(p);
+    const { data: tCfg } = await supabase
+      .from('instant_tests')
+      .select('proctor_config')
+      .eq('id', p.test_id)
+      .maybeSingle();
+    if (tCfg && (tCfg as { proctor_config?: ProctorConfig }).proctor_config) {
+      setProctorConfig((tCfg as { proctor_config: ProctorConfig }).proctor_config);
+    }
     setLoading(false);
   }, [attemptId]);
+
+  useProctorEngine({
+    enabled: secureChecked && Boolean(payload?.attempt_id) && !secondTabBlocked,
+    assessmentType: 'instant',
+    attemptId: payload?.attempt_id ?? '',
+    config: proctorConfig,
+    callbacks: {
+      onToast: (ruleId, msg) => {
+        setToastMsg(`${ruleId}: ${msg}`);
+        window.setTimeout(() => setToastMsg(null), 5000);
+      },
+      onModal: (ruleId, msg) => setModalAlert({ ruleId, msg }),
+      onHold: (ruleId, msg) => setHoldRule(ruleId ? { ruleId, msg } : null),
+      onSecondTabBlocked: () => setSecondTabBlocked(true),
+      onServerUpdate: (st) => {
+        setWarningCount(st.warningCount);
+        setIntegrityScore(st.integrityScore);
+        if (!st.activeHoldRule) setHoldRule(null);
+      },
+      onFaceCountChange: setFaceCount,
+      onStatusChange: setPStatus,
+    },
+  });
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -162,8 +218,102 @@ export function StudentInstantTestPage() {
     }
   }
 
+  const effective = resolveEffectiveRules(proctorConfig);
+
+  if (secondTabBlocked) {
+    return (
+      <main style={{ maxWidth: 560, margin: '64px auto', padding: '0 16px' }}>
+        <ErrorNote message="BL-11: This assessment is already open in another tab." />
+      </main>
+    );
+  }
+
+  if (!secureChecked) {
+    return (
+      <main style={{ maxWidth: 680, margin: '40px auto', padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <h1 style={{ fontSize: 18, fontWeight: 700 }}>{payload.topic} ({payload.test_code})</h1>
+        <SecureCheckPanel
+          config={proctorConfig}
+          onReadyToStart={async (record) => {
+            await rpc('student_save_proctor_start', {
+              p_assessment_type: 'instant',
+              p_attempt_id: payload.attempt_id,
+              p_start_record: record,
+            });
+            setSecureChecked(true);
+          }}
+        />
+      </main>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <ProctorBar
+        cameraRequired={effective.cameraRequired}
+        micRequired={effective.micRequired}
+        screenShareRequired={effective.screenShareRequired}
+        cameraOk={pStatus.cameraOk}
+        micOk={pStatus.micOk}
+        screenOk={pStatus.screenOk}
+        fullscreenOk={pStatus.fullscreenOk}
+        faceCount={faceCount}
+        warningCount={warningCount}
+        integrityScore={integrityScore}
+      />
+
+      {toastMsg ? (
+        <div role="status" style={{ position: 'fixed', top: 14, right: 14, zIndex: 1000, background: '#7A3410', color: '#FFF', padding: '10px 14px', borderRadius: 6, fontSize: 13 }}>
+          {toastMsg}
+        </div>
+      ) : null}
+
+      {modalAlert ? (
+        <div role="dialog" style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#FFF', padding: 20, borderRadius: 8, maxWidth: 420, width: '100%' }}>
+            <h3 style={{ margin: '0 0 8px' }}>Proctor alert ({modalAlert.ruleId})</h3>
+            <p style={{ fontSize: 13.5, margin: '0 0 14px' }}>{modalAlert.msg}</p>
+            <button type="button" className="btn btn-primary" onClick={() => setModalAlert(null)}>
+              Acknowledge & continue
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {holdRule ? (
+        <div role="alertdialog" style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(11,17,32,0.92)', color: '#FFF', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ maxWidth: 460, textAlign: 'center' }}>
+            <h2 style={{ margin: '0 0 8px' }}>Assessment paused ({holdRule.ruleId})</h2>
+            <p style={{ fontSize: 14, margin: '0 0 16px' }}>{holdRule.msg} Answers are locked until restored; timer keeps running.</p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={async () => {
+                  const ok = await requestExamFullscreen();
+                  if (ok && holdRule.ruleId === 'BL-01') setHoldRule(null);
+                }}
+              >
+                Return to fullscreen
+              </button>
+              {effective.screenShareRequired ? (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={async () => {
+                    const res = await requestEntireScreenShare();
+                    if (res.entireScreen && (holdRule.ruleId === 'BL-12' || holdRule.ruleId === 'SC-03')) {
+                      setHoldRule(null);
+                    }
+                  }}
+                >
+                  Share entire screen
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
       {hasPretest ? (
         <div style={{ padding: '12px 16px 0' }}>
           <Card
@@ -242,6 +392,7 @@ export function StudentInstantTestPage() {
         onRunCompleted={loadAttempt}
         onExit={async () => {
           await supabase.rpc('student_submit_instant_test', { p_attempt_id: payload.attempt_id });
+          stopProctorStreams();
           navigate('/student');
         }}
       />

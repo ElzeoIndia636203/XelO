@@ -357,7 +357,7 @@ export function Workbench({
           </span>
         ) : null}
 
-        {!isPreview ? (
+        {!isPreview && runContext === 'lab' ? (
           <span
             className="mono"
             style={{
@@ -623,7 +623,7 @@ export function Workbench({
                 outputs stay hidden; you only see passed or failed.
               </div>
 
-              {!isPreview ? (
+              {!isPreview && runContext === 'lab' ? (
                 <div
                   style={{
                     padding: 12,
