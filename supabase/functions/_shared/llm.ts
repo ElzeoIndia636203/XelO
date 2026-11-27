@@ -153,12 +153,12 @@ function resolveModelsForProvider(provider: ProviderKind, task?: LlmTaskGroup): 
   if (provider === 'nvidia') {
     const base =
       task === 'coding'
-        ? ['z-ai/glm-5.3-flash', 'moonshotai/kimi-k3.1-pro', 'nvidia/nemotron-3-ultra-550b-a55b', 'google/gemma-4-31b-it']
+        ? ['z-ai/glm-5.3-flash', 'moonshotai/kimi-k3.1-pro', 'nvidia/nemotron-3-ultra-550b-a55b', 'google/gemma-3-12b-it']
         : task === 'bank'
-          ? ['z-ai/glm-5.3-flash', 'minimaxai/minimax-m2.7', 'google/gemma-4-31b-it']
+          ? ['z-ai/glm-5.3-flash', 'minimaxai/minimax-m3.1-flash', 'google/gemma-3-12b-it']
           : task === 'academic'
-            ? ['mistralai/mistral-large-4', 'google/gemma-4-31b-it', 'z-ai/glm-5.3-flash']
-            : ['google/gemma-4-31b-it', 'z-ai/glm-5.3-flash'];
+            ? ['mistralai/mistral-large-4-1t-a52b', 'google/gemma-3-12b-it', 'z-ai/glm-5.3-flash']
+            : ['google/gemma-3-12b-it', 'z-ai/glm-5.3-flash'];
     return [taskOverride, globalOverride, ...base].filter(
       (m, idx, arr): m is string => Boolean(m) && arr.indexOf(m) === idx,
     );
