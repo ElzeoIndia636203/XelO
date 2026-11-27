@@ -312,7 +312,7 @@ export function InstantTestStep({
           course_id: course.id,
           topic: topic.trim(),
           slot,
-          bucket_size: 5,
+          bucket_size: 3,
           difficulty,
           co_code: selectedCo?.code ?? 'CO1',
           visible_count: visibleCount,
@@ -347,7 +347,7 @@ export function InstantTestStep({
       setQuestions(allBuilt);
       setActiveSlot(1);
       setActiveVariant(1);
-      onNotify(`Generated ${allBuilt.length} AI questions (${questionCount} slots × 5 variants).`, true);
+      onNotify(`Generated ${allBuilt.length} AI questions (${questionCount} slots × 3 variants).`, true);
     } catch (err) {
       onNotify(errorMessage(err), false);
     } finally {

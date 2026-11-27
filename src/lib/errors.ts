@@ -44,6 +44,8 @@ const MESSAGES: Record<string, string> = {
   ai_not_configured: 'AI provider key is not configured on the server.',
   invalid_ai_json: 'Assist returned invalid output and this run was not charged.',
   invalid_ai_shape: 'Assist output did not pass schema validation and was not charged.',
+  ai_invalid_output: 'Assist returned invalid output and this run was not charged.',
+  db_insert_failed: 'Failed to save generated items. Please try again.',
   already_submitted: 'This test has already been submitted.',
   test_closed: 'The submission window for this test is closed.',
   post_test_locked: 'Pass all hidden test cases for both lab questions to unlock the post-test.',
@@ -69,5 +71,8 @@ const MESSAGES: Record<string, string> = {
 
 export function errorMessage(err: unknown): string {
   const raw = err instanceof Error ? err.message.trim() : String(err).trim();
+  if (raw.startsWith('ai_http_') || raw.startsWith('judge_http_')) {
+    return `Service returned ${raw}. Please wait a moment and try again.`;
+  }
   return MESSAGES[raw] ?? 'Something went wrong. Please try again.';
 }
