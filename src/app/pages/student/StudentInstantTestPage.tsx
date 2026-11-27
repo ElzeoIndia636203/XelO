@@ -38,6 +38,7 @@ interface InstantAttemptPayload {
   pretest_answers?: Record<string, number>;
   pretest_questions?: InstantPretestQuestion[];
   final_score?: number;
+  attendance_status?: string | null;
   same_duration_per_q?: boolean;
   total_duration_minutes?: number;
   question_durations?: number[];
@@ -320,6 +321,19 @@ export function StudentInstantTestPage() {
               Back to student home
             </button>
           </div>
+        </Card>
+      </main>
+    );
+  }
+
+  // Attendance gate — questions must NOT be shown unless attendance is confirmed
+  if (payload.attendance_status !== 'present') {
+    return (
+      <main style={{ maxWidth: 560, margin: '64px auto', padding: '0 16px' }}>
+        <Card title={`${payload.topic} (${payload.test_code})`}>
+          <Banner tone="info">
+            Your attendance has not been marked for this test. Contact your faculty to proceed.
+          </Banner>
         </Card>
       </main>
     );

@@ -13,6 +13,30 @@ import type {
 
 const LazyCodeEditor = lazy(() => import('./CodeEditor'));
 
+/**
+ * Parse GCC/Clang/Python/Java compile output that embeds file:line:col: level: msg entries.
+ * Returns a formatted string with clean line references for the console.
+ */
+function formatCompileError(raw: string): string {
+  if (!raw) return 'Compilation error (no output).';
+  // Matches: filename:line:col: (error|warning|note|fatal error): message
+  const linePattern = /^([^:\n]+):(\d+):(\d+):\s*(error|warning|note|fatal error):\s*(.+)$/gm;
+  const entries: { line: number; col: number; level: string; msg: string }[] = [];
+  for (const m of raw.matchAll(linePattern)) {
+    entries.push({ line: parseInt(m[2] ?? '0', 10), col: parseInt(m[3] ?? '0', 10), level: m[4] ?? 'error', msg: m[5] ?? '' });
+  }
+  if (entries.length === 0) {
+    return `Compile error:\n${raw}`;
+  }
+  const errorCount = entries.filter((e) => e.level.includes('error')).length;
+  const warnCount = entries.filter((e) => e.level === 'warning').length;
+  const header = `Compile error — ${errorCount} error(s), ${warnCount} warning(s):\n`;
+  const formatted = entries
+    .map((e) => `  Line ${e.line}, Col ${e.col}  [${e.level.toUpperCase()}]  ${e.msg}`)
+    .join('\n');
+  return header + formatted + '\n\n--- Raw output ---\n' + raw;
+}
+
 export interface WorkbenchQuestion {
   question: QuestionRow;
   visibleTests: TestCaseRow[];
@@ -197,6 +221,17 @@ export function Workbench({
         ...(paperId ? { paper_id: paperId } : {}),
       });
       setRunOutputs((prev) => new Map(prev).set(activeQ.id, res));
+      // Always persist last-executed code immediately after a successful run/submit
+      if (onSaveDraft) {
+        dirtyRef.current.delete(key);
+        setSaveLabel('saving…');
+        try {
+          await onSaveDraft(activeQ.id, activeLang, code);
+          setSaveLabel('saved');
+        } catch {
+          setSaveLabel('save failed');
+        }
+      }
       onRunCompleted?.();
       if (runMode === 'submit') {
         onQuestionSubmitted?.(activeQ.id, qi);
@@ -257,7 +292,7 @@ export function Workbench({
       return `${labelForLang(activeLang)} · ${fileForLang(activeLang)}\nPress Run to execute the visible test cases, or Submit to evaluate all tests.`;
     }
     if (activeRunOut.compile_error) {
-      return `Compile error:\n${activeRunOut.compile_error}`;
+      return formatCompileError(activeRunOut.compile_error);
     }
     if (activeRunOut.mode === 'run') {
       const lines = activeRunOut.visible_results.map(
