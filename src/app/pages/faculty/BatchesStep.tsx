@@ -44,6 +44,8 @@ export function BatchesStep({
     Record<string, { slot: string; room: string; staff: string }>
   >({});
   const [studentSearch, setStudentSearch] = useState('');
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [bulkTargetBatchId, setBulkTargetBatchId] = useState('');
   const [busy, setBusy] = useState(false);
 
   const profileMap = new Map(studentProfiles.map((p) => [p.id, p]));
@@ -225,6 +227,83 @@ export function BatchesStep({
         p_to_batch_id: toBatchId,
       });
       onNotify(`Moved ${email}.`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function splitSelectedIds(keys: readonly string[]) {
+    const enrollmentIds: string[] = [];
+    const pendingIds: string[] = [];
+    for (const k of keys) {
+      if (k.startsWith('enr:')) enrollmentIds.push(k.slice(4));
+      else if (k.startsWith('pend:')) pendingIds.push(k.slice(5));
+    }
+    return { enrollmentIds, pendingIds };
+  }
+
+  function toggleSelectKey(key: string) {
+    setSelectedKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  }
+
+  function toggleSelectBatch(batchMemberKeys: readonly string[]) {
+    const allSelected =
+      batchMemberKeys.length > 0 && batchMemberKeys.every((k) => selectedKeys.includes(k));
+    setSelectedKeys((prev) => {
+      if (allSelected) {
+        return prev.filter((k) => !batchMemberKeys.includes(k));
+      }
+      const next = new Set(prev);
+      for (const k of batchMemberKeys) next.add(k);
+      return Array.from(next);
+    });
+  }
+
+  async function moveSelectedStudents() {
+    const targetId = bulkTargetBatchId || batches[0]?.id || '';
+    if (!targetId || selectedKeys.length === 0) return;
+    const { enrollmentIds, pendingIds } = splitSelectedIds(selectedKeys);
+    setBusy(true);
+    try {
+      const moved = await rpc<number>('move_students_bulk', {
+        p_course_id: course.id,
+        p_enrollment_ids: enrollmentIds,
+        p_pending_ids: pendingIds,
+        p_to_batch_id: targetId,
+      });
+      const targetName = batches.find((b) => b.id === targetId)?.name ?? 'batch';
+      setSelectedKeys([]);
+      onNotify(`Moved ${moved} student(s) to ${targetName}.`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeStudentsByKeys(keys: readonly string[], label?: string) {
+    if (keys.length === 0) return;
+    const confirmMsg =
+      label
+        ? `Remove ${label} from this course?`
+        : `Remove ${keys.length} selected student(s) from this course?`;
+    if (!window.confirm(confirmMsg)) return;
+    const { enrollmentIds, pendingIds } = splitSelectedIds(keys);
+    setBusy(true);
+    try {
+      const removed = await rpc<number>('remove_course_students', {
+        p_course_id: course.id,
+        p_enrollment_ids: enrollmentIds,
+        p_pending_ids: pendingIds,
+      });
+      setSelectedKeys((prev) => prev.filter((k) => !keys.includes(k)));
+      onNotify(`Removed ${removed} student(s) from the course.`, true);
       onRefresh();
     } catch (err) {
       onNotify(errorMessage(err), false);
@@ -425,19 +504,67 @@ export function BatchesStep({
         />
       ) : (
         <>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            <input
-              type="search"
-              className="field"
-              value={studentSearch}
-              onChange={(e) => setStudentSearch(e.target.value)}
-              placeholder="Search students by roll no, name, or email…"
-              style={{ maxWidth: 360 }}
-            />
-            {studentSearch.trim() ? (
-              <button type="button" className="btn field-sm" onClick={() => setStudentSearch('')}>
-                Clear search
-              </button>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <input
+                type="search"
+                className="field"
+                value={studentSearch}
+                onChange={(e) => setStudentSearch(e.target.value)}
+                placeholder="Search students by roll no, name, or email…"
+                style={{ width: 320, maxWidth: '100%' }}
+              />
+              {studentSearch.trim() ? (
+                <button type="button" className="btn field-sm" onClick={() => setStudentSearch('')}>
+                  Clear search
+                </button>
+              ) : null}
+            </div>
+            {selectedKeys.length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                <Chip tone="neutral">{selectedKeys.length} selected</Chip>
+                {batches.length > 1 ? (
+                  <>
+                    <select
+                      aria-label="Target batch for selected students"
+                      className="field field-sm"
+                      disabled={hasConductedSession || busy}
+                      value={bulkTargetBatchId || batches[0]?.id || ''}
+                      onChange={(e) => setBulkTargetBatchId(e.target.value)}
+                    >
+                      {batches.map((target) => (
+                        <option key={target.id} value={target.id}>
+                          {target.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-primary field-sm"
+                      disabled={hasConductedSession || busy}
+                      onClick={() => void moveSelectedStudents()}
+                    >
+                      Move selected
+                    </button>
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn field-sm"
+                  disabled={hasConductedSession || busy}
+                  onClick={() => void removeStudentsByKeys(selectedKeys)}
+                >
+                  Remove selected
+                </button>
+                <button
+                  type="button"
+                  className="btn field-sm"
+                  disabled={busy}
+                  onClick={() => setSelectedKeys([])}
+                >
+                  Clear
+                </button>
+              </div>
             ) : null}
           </div>
           {batches.map((b) => {
@@ -447,7 +574,7 @@ export function BatchesStep({
             .map((e) => {
               const p = profileMap.get(e.student_id);
               return {
-                key: e.id,
+                key: `enr:${e.id}`,
                 roll: p?.roll_no ?? '—',
                 name: p?.full_name ?? 'Student',
                 email: p?.email ?? '',
@@ -457,7 +584,7 @@ export function BatchesStep({
           const batchPending = pendingEnrollments
             .filter((pe) => pe.batch_id === b.id)
             .map((pe) => ({
-              key: pe.id,
+              key: `pend:${pe.id}`,
               roll: pe.roll_no,
               name: pe.full_name,
               email: pe.email,
@@ -545,16 +672,39 @@ export function BatchesStep({
                     <table>
                       <thead>
                         <tr>
+                          <th style={{ width: 32 }}>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select all in ${b.name}`}
+                              disabled={hasConductedSession || busy}
+                              checked={
+                                members.length > 0 &&
+                                members.every((m) => selectedKeys.includes(m.key))
+                              }
+                              onChange={() =>
+                                toggleSelectBatch(members.map((m) => m.key))
+                              }
+                            />
+                          </th>
                           <th>Roll</th>
                           <th>Name</th>
                           <th>Email</th>
                           <th>Status</th>
-                          {batches.length > 1 ? <th style={{ textAlign: 'right' }}>Batch</th> : null}
+                          <th style={{ textAlign: 'right' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {members.map((m) => (
                           <tr key={m.key}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${m.email || m.name}`}
+                                disabled={hasConductedSession || busy}
+                                checked={selectedKeys.includes(m.key)}
+                                onChange={() => toggleSelectKey(m.key)}
+                              />
+                            </td>
                             <td className="mono">{m.roll}</td>
                             <td>{m.name}</td>
                             <td className="mono" style={{ fontSize: 12 }}>
@@ -565,27 +715,42 @@ export function BatchesStep({
                                 {m.joined ? 'Joined' : 'Invited'}
                               </Chip>
                             </td>
-                            {batches.length > 1 ? (
-                              <td style={{ textAlign: 'right' }}>
-                                <select
-                                  aria-label={`Move ${m.email} to batch`}
-                                  className="field field-sm"
-                                  disabled={hasConductedSession || busy || !m.email}
-                                  value={b.id}
-                                  onChange={(e) => {
-                                    if (e.target.value !== b.id) {
-                                      void moveStudent(m.email, e.target.value);
-                                    }
-                                  }}
+                            <td style={{ textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                                {batches.length > 1 ? (
+                                  <select
+                                    aria-label={`Move ${m.email || m.name} to batch`}
+                                    className="field field-sm"
+                                    disabled={hasConductedSession || busy || !m.email}
+                                    value={b.id}
+                                    onChange={(e) => {
+                                      if (e.target.value !== b.id) {
+                                        void moveStudent(m.email, e.target.value);
+                                      }
+                                    }}
+                                  >
+                                    {batches.map((target) => (
+                                      <option key={target.id} value={target.id}>
+                                        {target.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="btn field-sm"
+                                  disabled={hasConductedSession || busy}
+                                  onClick={() =>
+                                    void removeStudentsByKeys(
+                                      [m.key],
+                                      m.email || m.name || 'this student',
+                                    )
+                                  }
                                 >
-                                  {batches.map((target) => (
-                                    <option key={target.id} value={target.id}>
-                                      {target.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
-                            ) : null}
+                                  Remove
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
