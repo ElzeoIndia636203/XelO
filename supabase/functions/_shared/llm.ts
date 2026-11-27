@@ -85,47 +85,98 @@ export async function callLlmJson<T>(
   validate: (parsed: unknown) => T,
   maxAttempts = 2,
 ): Promise<T> {
-  const geminiKey = Deno.env.get('GEMINI_API_KEY');
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!geminiKey && !anthropicKey) {
+  const primaryGemini = Deno.env.get('GEMINI_API_KEY_PRIMARY')?.trim();
+  const defaultGemini = Deno.env.get('GEMINI_API_KEY')?.trim();
+  const explicitBackup = Deno.env.get('GEMINI_API_KEY_BACKUP')?.trim();
+  const geminiKeys = [primaryGemini, defaultGemini, explicitBackup].filter(
+    (k, idx, arr): k is string => Boolean(k) && arr.indexOf(k) === idx,
+  );
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')?.trim();
+  if (geminiKeys.length === 0 && !anthropicKey) {
     throw new Error('ai_not_configured');
   }
 
-  const useGemini = Boolean(geminiKey);
-  const model =
-    Deno.env.get('AI_MODEL') ??
-    (useGemini ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514');
+  const useGemini = geminiKeys.length > 0;
+  const configuredModel = Deno.env.get('AI_MODEL')?.trim();
+  const geminiModels = configuredModel
+    ? [configuredModel]
+    : ['gemini-3.8-flash', 'gemini-2.5-flash'];
+  const anthropicModel = configuredModel ?? 'claude-sonnet-4-20250514';
   const maxTokens = opts.maxTokens ?? (useGemini ? 4096 : 2048);
 
   let lastErr: unknown = new Error('ai_failed');
   let prompt = opts.user;
-  let transientRetries = 0;
 
-  for (let attempt = 1; attempt <= maxAttempts; ) {
-    const out = useGemini
-      ? await callGeminiText(geminiKey!, model, opts.system, prompt, maxTokens)
-      : await callAnthropicText(anthropicKey!, model, opts.system, prompt, maxTokens);
-
-    if (!out.ok) {
-      lastErr = new Error(`ai_http_${out.status}`);
-      const isTransient = out.status === 429 || out.status === 500 || out.status === 502 || out.status === 503 || out.status === 504;
-      if (isTransient && transientRetries < 3) {
-        transientRetries += 1;
-        const delayMs = out.retryAfterMs ?? Math.min(12_000, 2000 * 2 ** (transientRetries - 1));
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+  if (!useGemini) {
+    let transientRetries = 0;
+    for (let attempt = 1; attempt <= maxAttempts; ) {
+      const out = await callAnthropicText(anthropicKey!, anthropicModel, opts.system, prompt, maxTokens);
+      if (!out.ok) {
+        lastErr = new Error(`ai_http_${out.status}`);
+        const isTransient = out.status === 429 || out.status === 500 || out.status === 502 || out.status === 503 || out.status === 504;
+        if (isTransient && transientRetries < 3) {
+          transientRetries += 1;
+          const delayMs = out.retryAfterMs ?? Math.min(12_000, 2000 * 2 ** (transientRetries - 1));
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+        attempt += 1;
         continue;
       }
-      attempt += 1;
-      continue;
+      try {
+        const parsed = extractJsonObject(out.text);
+        return validate(parsed);
+      } catch (err) {
+        lastErr = err;
+        attempt += 1;
+        prompt = `${opts.user}\n\nYour previous reply was not valid JSON matching the schema. Return ONLY a single valid JSON object with no markdown prose.`;
+      }
     }
+    throw lastErr instanceof Error ? lastErr : new Error('ai_invalid_output');
+  }
 
-    try {
-      const parsed = extractJsonObject(out.text);
-      return validate(parsed);
-    } catch (err) {
-      lastErr = err;
-      attempt += 1;
-      prompt = `${opts.user}\n\nYour previous reply was not valid JSON matching the schema. Return ONLY a single valid JSON object with no markdown prose.`;
+  for (let keyIdx = 0; keyIdx < geminiKeys.length; keyIdx++) {
+    const apiKey = geminiKeys.at(keyIdx)!;
+    const hasBackup = keyIdx < geminiKeys.length - 1;
+    let modelIdx = 0;
+    let transientRetries = 0;
+
+    for (let attempt = 1; attempt <= maxAttempts; ) {
+      const model = geminiModels.at(modelIdx)!;
+      const out = await callGeminiText(apiKey, model, opts.system, prompt, maxTokens);
+
+      if (!out.ok) {
+        lastErr = new Error(`ai_http_${out.status}`);
+        if (out.status === 404 && modelIdx < geminiModels.length - 1) {
+          modelIdx += 1;
+          continue;
+        }
+        // Fail over immediately to backup key on quota/auth errors when a backup key exists
+        if ((out.status === 429 || out.status === 403 || out.status === 401) && hasBackup) {
+          break;
+        }
+        const isTransient = out.status === 429 || out.status === 500 || out.status === 502 || out.status === 503 || out.status === 504;
+        if (isTransient && transientRetries < (hasBackup ? 1 : 3)) {
+          transientRetries += 1;
+          const delayMs = out.retryAfterMs ?? Math.min(12_000, 2000 * 2 ** (transientRetries - 1));
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+        if (hasBackup) {
+          break;
+        }
+        attempt += 1;
+        continue;
+      }
+
+      try {
+        const parsed = extractJsonObject(out.text);
+        return validate(parsed);
+      } catch (err) {
+        lastErr = err;
+        attempt += 1;
+        prompt = `${opts.user}\n\nYour previous reply was not valid JSON matching the schema. Return ONLY a single valid JSON object with no markdown prose.`;
+      }
     }
   }
 
