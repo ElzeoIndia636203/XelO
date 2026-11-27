@@ -128,13 +128,47 @@ export function NotificationBell({ variant = 'light' }: { variant?: 'dark' | 'li
         aria-expanded={open}
         aria-label={`Notifications (${unreadCount} unread)`}
         onClick={() => setOpen((prev) => !prev)}
-        style={
-          variant === 'dark'
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          ...(variant === 'dark'
             ? { background: '#2C2B28', color: '#FFFFFF', borderColor: '#3E3D39' }
-            : undefined
-        }
+            : {}),
+        }}
       >
-        Bell ({unreadCount})
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+        {unreadCount > 0 ? (
+          <span
+            style={{
+              marginLeft: 5,
+              padding: '0 5px',
+              minWidth: 16,
+              height: 16,
+              borderRadius: 999,
+              background: '#D97706',
+              color: '#FFFFFF',
+              fontSize: 11,
+              fontWeight: 600,
+              lineHeight: '16px',
+              textAlign: 'center',
+            }}
+          >
+            {unreadCount}
+          </span>
+        ) : null}
       </button>
 
       {open ? (
