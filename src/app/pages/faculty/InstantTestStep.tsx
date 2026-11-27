@@ -29,6 +29,8 @@ interface InstantQuestionDraft {
   hidden_marks: number;
   visible_tests: InstantTestCase[];
   hidden_tests: InstantTestCase[];
+  validated?: boolean;
+  approved?: boolean;
 }
 
 interface InstantPretestDraft {
@@ -166,7 +168,12 @@ export function InstantTestStep({
   const [pretestDifficulty, setPretestDifficulty] = useState<'easy' | 'medium' | 'hard' | 'mixed'>('medium');
   const [pretestMarks, setPretestMarks] = useState(0);
   const [pretestQuestions, setPretestQuestions] = useState<InstantPretestDraft[]>([]);
+  const [posttestCount, setPosttestCount] = useState(0);
+  const [posttestDifficulty, setPosttestDifficulty] = useState<'easy' | 'medium' | 'hard' | 'mixed'>('medium');
+  const [posttestMarks, setPosttestMarks] = useState(0);
   const [vivaMarks, setVivaMarks] = useState(0);
+  const [slotDifficulties, setSlotDifficulties] = useState<Array<'easy' | 'medium' | 'hard' | 'mixed'>>(['medium', 'medium']);
+  const [markMatrixApproved, setMarkMatrixApproved] = useState(false);
 
   const [scopeType, setScopeType] = useState<'class' | 'batch' | 'students'>('class');
   const [targetBatchIds, setTargetBatchIds] = useState<string[]>([]);
@@ -208,10 +215,19 @@ export function InstantTestStep({
 
   const selectedCo = outcomes.find((o) => o.id === coId) ?? outcomes[0] ?? null;
   const studentMap = new Map(studentProfiles.map((p) => [p.id, p]));
+  const targetStrength =
+    scopeType === 'class'
+      ? enrollments.length
+      : scopeType === 'batch'
+        ? enrollments.filter((e) => targetBatchIds.includes(e.batch_id)).length
+        : targetStudentIds.length;
+  const bucketTarget = Math.max(questionCount, Math.ceil(Math.max(1, targetStrength) * 0.5));
+  const approvedQuestions = questions.filter((q) => q.approved);
   const computedTotalMarks = Number(
     (
       (pretestCount > 0 ? pretestMarks : 0) +
       questionCount * (visibleMarks + hiddenMarks) +
+      (posttestCount > 0 ? posttestMarks : 0) +
       vivaMarks
     ).toFixed(2),
   );
@@ -300,7 +316,7 @@ export function InstantTestStep({
     });
   }
 
-  async function generateAiBuckets() {
+  async function generateAiBuckets(regenerateBalanceOnly = false) {
     if (!topic.trim()) {
       onNotify('Enter a topic before generating question buckets.', false);
       return;
@@ -309,68 +325,94 @@ export function InstantTestStep({
       onNotify('At least 1 visible and 1 hidden test case are required.', false);
       return;
     }
+    const needTotal = regenerateBalanceOnly ? Math.max(0, bucketTarget - questions.length) : bucketTarget;
+    if (needTotal <= 0) {
+      onNotify(`Bucket already has ${questions.length}/${bucketTarget} questions.`, true);
+      return;
+    }
+
     setBusy(true);
     const perQMarks = Number((visibleMarks + hiddenMarks).toFixed(2));
-    const allBuilt: InstantQuestionDraft[] = [];
-    const avoidTitles: string[] = [];
+    const existing = regenerateBalanceOnly ? [...questions] : [];
+    const allBuilt: InstantQuestionDraft[] = [...existing];
+    const avoidTitles: string[] = existing.map((q) => q.title);
 
     try {
-      for (let slot = 1; slot <= questionCount; slot++) {
-        setGenProgress(`Generating AI question variants for Question ${slot} of ${questionCount}…`);
-        const res = await fn<{
-          questions: Array<{
-            title: string;
-            statement: string;
-            input_spec: string;
-            output_spec: string;
-            constraints: string;
-            sample_input: string;
-            sample_output: string;
-            difficulty: 'easy' | 'medium' | 'hard';
-            visible_tests: InstantTestCase[];
-            hidden_tests: InstantTestCase[];
-          }>;
-        }>('ai-generate', {
-          kind: 'instant_test_bucket',
-          course_id: course.id,
-          topic: topic.trim(),
-          slot,
-          bucket_size: 3,
-          difficulty,
-          co_code: selectedCo?.code ?? 'CO1',
-          visible_count: visibleCount,
-          hidden_count: hiddenCount,
-          avoid_titles: avoidTitles,
-        });
+      let remaining = needTotal;
+      for (let slot = 1; slot <= questionCount && remaining > 0; slot++) {
+        const slotTarget = regenerateBalanceOnly
+          ? Math.ceil(remaining / (questionCount - slot + 1))
+          : Math.min(remaining, Math.max(1, Math.ceil(bucketTarget / questionCount)));
+        const slotDiff = questionCount > 1 ? (slotDifficulties[slot - 1] ?? difficulty) : difficulty;
+        let slotBuilt = 0;
 
-        for (let vi = 0; vi < res.questions.length; vi++) {
-          const item = res.questions[vi]!;
-          avoidTitles.push(item.title);
-          allBuilt.push({
-            id: `s${slot}_v${vi + 1}`,
+        while (slotBuilt < slotTarget && remaining > 0) {
+          const chunk = Math.min(5, slotTarget - slotBuilt, remaining);
+          setGenProgress(
+            `Generating AI questions for Q${slot} (${allBuilt.length}/${bucketTarget} in bucket)…`,
+          );
+          const res = await fn<{
+            questions: Array<{
+              title: string;
+              statement: string;
+              input_spec: string;
+              output_spec: string;
+              constraints: string;
+              sample_input: string;
+              sample_output: string;
+              difficulty: 'easy' | 'medium' | 'hard';
+              visible_tests: InstantTestCase[];
+              hidden_tests: InstantTestCase[];
+            }>;
+          }>('ai-generate', {
+            kind: 'instant_test_bucket',
+            course_id: course.id,
+            topic: topic.trim(),
             slot,
-            variant: vi + 1,
-            title: item.title,
-            statement: item.statement,
-            input_spec: item.input_spec,
-            output_spec: item.output_spec,
-            constraints: item.constraints,
-            sample_input: item.sample_input,
-            sample_output: item.sample_output,
-            difficulty: item.difficulty,
-            marks: perQMarks,
+            bucket_size: chunk,
+            difficulty: slotDiff,
             co_code: selectedCo?.code ?? 'CO1',
-            visible_marks: visibleMarks,
-            hidden_marks: hiddenMarks,
-            visible_tests: item.visible_tests,
-            hidden_tests: item.hidden_tests,
+            visible_count: visibleCount,
+            hidden_count: hiddenCount,
+            avoid_titles: avoidTitles,
           });
+
+          const currentSlotCount = allBuilt.filter((q) => q.slot === slot).length;
+          for (let vi = 0; vi < res.questions.length; vi++) {
+            const item = res.questions[vi]!;
+            avoidTitles.push(item.title);
+            const vNum = currentSlotCount + vi + 1;
+            allBuilt.push({
+              id: `s${slot}_v${vNum}_${Date.now()}_${vi}`,
+              slot,
+              variant: vNum,
+              title: item.title,
+              statement: item.statement,
+              input_spec: item.input_spec,
+              output_spec: item.output_spec,
+              constraints: item.constraints,
+              sample_input: item.sample_input,
+              sample_output: item.sample_output,
+              difficulty: item.difficulty,
+              marks: perQMarks,
+              co_code: selectedCo?.code ?? 'CO1',
+              visible_marks: visibleMarks,
+              hidden_marks: hiddenMarks,
+              visible_tests: item.visible_tests,
+              hidden_tests: item.hidden_tests,
+              validated: false,
+              approved: false,
+            });
+          }
+          slotBuilt += res.questions.length;
+          remaining -= res.questions.length;
+          if (res.questions.length === 0) break;
         }
       }
       setQuestions(allBuilt);
       setActiveSlot(1);
-      setActiveVariant(1);
-      onNotify(`Generated ${allBuilt.length} AI questions (${questionCount} slots × 3 variants).`, true);
+      setActiveVariant(allBuilt.find((q) => q.slot === 1)?.variant ?? 1);
+      onNotify(`Bucket updated: ${allBuilt.length}/${bucketTarget} questions (validate & approve to publish).`, true);
     } catch (err) {
       onNotify(errorMessage(err), false);
     } finally {
@@ -379,14 +421,122 @@ export function InstantTestStep({
     }
   }
 
-  async function publishTest(e: FormEvent) {
-    e.preventDefault();
-    if (!topic.trim() || questions.length === 0) {
-      onNotify('Enter a topic and generate the AI question buckets before saving.', false);
+  function addManualQuestion() {
+    const perQMarks = Number((visibleMarks + hiddenMarks).toFixed(2));
+    const slotCount = questions.filter((q) => q.slot === activeSlot).length;
+    const nextVar = slotCount + 1;
+    const diff = questionCount > 1 ? (slotDifficulties[activeSlot - 1] ?? difficulty) : difficulty;
+    const q: InstantQuestionDraft = {
+      id: `s${activeSlot}_m${nextVar}_${Date.now()}`,
+      slot: activeSlot,
+      variant: nextVar,
+      title: `Manual Q${activeSlot}.${nextVar}`,
+      statement: '',
+      input_spec: '',
+      output_spec: '',
+      constraints: '',
+      sample_input: '',
+      sample_output: '',
+      difficulty: diff === 'mixed' ? 'medium' : diff,
+      marks: perQMarks,
+      co_code: selectedCo?.code ?? 'CO1',
+      visible_marks: visibleMarks,
+      hidden_marks: hiddenMarks,
+      visible_tests: Array.from({ length: visibleCount }, () => ({ input: '', expected: '' })),
+      hidden_tests: Array.from({ length: hiddenCount }, () => ({ input: '', expected: '' })),
+      validated: false,
+      approved: false,
+    };
+    setQuestions((prev) => [...prev, q]);
+    setActiveVariant(nextVar);
+  }
+
+  async function handleUploadQuestions(file: File | null) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const perQMarks = Number((visibleMarks + hiddenMarks).toFixed(2));
+      const parsed = JSON.parse(text) as Array<Partial<InstantQuestionDraft>>;
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        onNotify('Upload a JSON array of questions.', false);
+        return;
+      }
+      const built: InstantQuestionDraft[] = parsed.map((item, idx) => {
+        const slot = item.slot && item.slot >= 1 && item.slot <= questionCount ? item.slot : (idx % questionCount) + 1;
+        const vNum = questions.filter((q) => q.slot === slot).length + idx + 1;
+        return {
+          id: `up_${slot}_${vNum}_${Date.now()}`,
+          slot,
+          variant: vNum,
+          title: String(item.title ?? `Uploaded Q${idx + 1}`),
+          statement: String(item.statement ?? ''),
+          input_spec: String(item.input_spec ?? ''),
+          output_spec: String(item.output_spec ?? ''),
+          constraints: String(item.constraints ?? ''),
+          sample_input: String(item.sample_input ?? ''),
+          sample_output: String(item.sample_output ?? ''),
+          difficulty: item.difficulty === 'easy' || item.difficulty === 'hard' ? item.difficulty : 'medium',
+          marks: perQMarks,
+          co_code: selectedCo?.code ?? 'CO1',
+          visible_marks: visibleMarks,
+          hidden_marks: hiddenMarks,
+          visible_tests: Array.isArray(item.visible_tests) && item.visible_tests.length >= 1
+            ? item.visible_tests
+            : [{ input: '1', expected: '1' }],
+          hidden_tests: Array.isArray(item.hidden_tests) && item.hidden_tests.length >= 1
+            ? item.hidden_tests
+            : [{ input: '2', expected: '2' }],
+          validated: false,
+          approved: false,
+        };
+      });
+      setQuestions((prev) => [...prev, ...built]);
+      onNotify(`Uploaded ${built.length} question(s). Validate & approve before publishing.`, true);
+    } catch {
+      onNotify('Invalid JSON file format for question upload.', false);
+    }
+  }
+
+  function validateQuestionDraft(qId: string) {
+    const q = questions.find((x) => x.id === qId);
+    if (!q) return;
+    if (!q.title.trim() || !q.statement.trim() || q.visible_tests.length < 1 || q.hidden_tests.length < 1) {
+      onNotify('Question needs title, statement, and at least 1 visible + 1 hidden test case to validate.', false);
       return;
     }
-    if (visibleCount < 1 || hiddenCount < 1 || questions.some((q) => q.visible_tests.length < 1 || q.hidden_tests.length < 1)) {
-      onNotify('Every question must have at least 1 visible and 1 hidden test case.', false);
+    if (q.visible_tests.some((t) => !t.expected.trim()) || q.hidden_tests.some((t) => !t.expected.trim())) {
+      onNotify('All visible and hidden test cases must have expected output.', false);
+      return;
+    }
+    setQuestions((prev) => prev.map((x) => (x.id === qId ? { ...x, validated: true } : x)));
+    onNotify(`Validated "${q.title}". You can now approve it.`, true);
+  }
+
+  function approveQuestionDraft(qId: string) {
+    const q = questions.find((x) => x.id === qId);
+    if (!q?.validated) {
+      onNotify('Validate the question first before approving.', false);
+      return;
+    }
+    setQuestions((prev) => prev.map((x) => (x.id === qId ? { ...x, approved: true } : x)));
+  }
+
+  function discardQuestionDraft(qId: string) {
+    setQuestions((prev) => prev.filter((x) => x.id !== qId));
+  }
+
+  async function publishTest(e: FormEvent) {
+    e.preventDefault();
+    if (!markMatrixApproved) {
+      onNotify('Approve the Mark Allocation Matrix before publishing.', false);
+      return;
+    }
+    if (!topic.trim() || approvedQuestions.length < bucketTarget) {
+      onNotify(`Validate and approve at least ${bucketTarget} questions (50% of ${targetStrength} strength) before saving.`, false);
+      return;
+    }
+    if (visibleCount < 1 || hiddenCount < 1 || approvedQuestions.some((q) => q.visible_tests.length < 1 || q.hidden_tests.length < 1)) {
+      onNotify('Every approved question must have at least 1 visible and 1 hidden test case.', false);
       return;
     }
     if (computedTotalMarks <= 0) {
@@ -421,7 +571,7 @@ export function InstantTestStep({
         p_visible_marks: visibleMarks,
         p_hidden_marks: hiddenMarks,
         p_allowed_langs: langs,
-        p_questions: questions,
+        p_questions: approvedQuestions,
         p_scope_type: scopeType,
         p_target_batch_ids: targetBatchIds,
         p_target_student_ids: targetStudentIds,
@@ -432,6 +582,10 @@ export function InstantTestStep({
         p_pretest_marks: pretestCount > 0 ? pretestMarks : 0,
         p_pretest_questions: pretestCount > 0 ? pretestQuestions : [],
         p_viva_marks: vivaMarks,
+        p_posttest_count: posttestCount,
+        p_posttest_difficulty: posttestDifficulty,
+        p_posttest_marks: posttestCount > 0 ? posttestMarks : 0,
+        p_mark_matrix_approved: markMatrixApproved,
       });
       await rpc('faculty_set_proctor_config', {
         p_assessment_type: 'instant',
@@ -945,22 +1099,37 @@ export function InstantTestStep({
                 min={1}
                 max={20}
                 value={questionCount}
-                onChange={(e) => setQuestionCount(Math.max(1, Number(e.target.value)))}
+                onChange={(e) => {
+                  const next = Math.max(1, Number(e.target.value));
+                  setQuestionCount(next);
+                  setMarkMatrixApproved(false);
+                }}
               />
             </label>
-            <label className="field-label">
-              Coding difficulty
-              <select
-                className="field"
-                value={difficulty}
-                onChange={(e) => setDifficulty(e.target.value as 'easy' | 'medium' | 'hard' | 'mixed')}
-              >
-                <option value="easy">Easy</option>
-                <option value="medium">Medium</option>
-                <option value="hard">Hard</option>
-                <option value="mixed">Mixed</option>
-              </select>
-            </label>
+            {questionCount === 1 ? (
+              <label className="field-label">
+                Coding difficulty
+                <select
+                  className="field"
+                  value={difficulty}
+                  onChange={(e) => {
+                    const val = e.target.value as 'easy' | 'medium' | 'hard' | 'mixed';
+                    setDifficulty(val);
+                    setSlotDifficulties((prev) => {
+                      const next = [...prev];
+                      next[0] = val;
+                      return next;
+                    });
+                    setMarkMatrixApproved(false);
+                  }}
+                >
+                  <option value="easy">Easy</option>
+                  <option value="medium">Medium</option>
+                  <option value="hard">Hard</option>
+                  <option value="mixed">Mixed</option>
+                </select>
+              </label>
+            ) : null}
             <label className="field-label">
               Mapped CO
               <select className="field" value={selectedCo?.id ?? ''} onChange={(e) => setCoId(e.target.value)}>
@@ -974,9 +1143,42 @@ export function InstantTestStep({
             </label>
           </div>
 
+          {questionCount > 1 ? (
+            <div style={{ padding: 10, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+                Individual question difficulty ({questionCount} questions)
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: 8 }}>
+                {Array.from({ length: questionCount }, (_, idx) => (
+                  <label key={idx} className="field-label">
+                    Q{idx + 1} difficulty
+                    <select
+                      className="field field-sm"
+                      value={slotDifficulties[idx] ?? difficulty}
+                      onChange={(e) => {
+                        const val = e.target.value as 'easy' | 'medium' | 'hard' | 'mixed';
+                        setSlotDifficulties((prev) => {
+                          const next = Array.from({ length: questionCount }, (_, i) => prev[i] ?? difficulty);
+                          next[idx] = val;
+                          return next;
+                        });
+                        setMarkMatrixApproved(false);
+                      }}
+                    >
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                      <option value="mixed">Mixed</option>
+                    </select>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div style={{ padding: 10, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-              Rubric & weightage (Total: {computedTotalMarks} marks · Pre-test & Viva can be 0; ≥1 visible & ≥1 hidden test mandatory)
+              Rubric & weightage (Total: {computedTotalMarks} marks · Pre-test, Post-lab & Viva can be 0; ≥1 visible & ≥1 hidden test mandatory)
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 10 }}>
               <label className="field-label">
@@ -987,7 +1189,10 @@ export function InstantTestStep({
                   min={1}
                   max={10}
                   value={visibleCount}
-                  onChange={(e) => setVisibleCount(Math.max(1, Number(e.target.value)))}
+                  onChange={(e) => {
+                    setVisibleCount(Math.max(1, Number(e.target.value)));
+                    setMarkMatrixApproved(false);
+                  }}
                 />
               </label>
               <label className="field-label">
@@ -998,7 +1203,10 @@ export function InstantTestStep({
                   min={0}
                   step="0.5"
                   value={visibleMarks}
-                  onChange={(e) => setVisibleMarks(Math.max(0, Number(e.target.value)))}
+                  onChange={(e) => {
+                    setVisibleMarks(Math.max(0, Number(e.target.value)));
+                    setMarkMatrixApproved(false);
+                  }}
                 />
               </label>
               <label className="field-label">
@@ -1009,7 +1217,10 @@ export function InstantTestStep({
                   min={1}
                   max={10}
                   value={hiddenCount}
-                  onChange={(e) => setHiddenCount(Math.max(1, Number(e.target.value)))}
+                  onChange={(e) => {
+                    setHiddenCount(Math.max(1, Number(e.target.value)));
+                    setMarkMatrixApproved(false);
+                  }}
                 />
               </label>
               <label className="field-label">
@@ -1020,7 +1231,10 @@ export function InstantTestStep({
                   min={0}
                   step="0.5"
                   value={hiddenMarks}
-                  onChange={(e) => setHiddenMarks(Math.max(0, Number(e.target.value)))}
+                  onChange={(e) => {
+                    setHiddenMarks(Math.max(0, Number(e.target.value)));
+                    setMarkMatrixApproved(false);
+                  }}
                 />
               </label>
               <label className="field-label">
@@ -1031,7 +1245,10 @@ export function InstantTestStep({
                   min={0}
                   max={20}
                   value={pretestCount}
-                  onChange={(e) => syncPretestSlots(Math.min(20, Math.max(0, Math.trunc(Number(e.target.value) || 0))))}
+                  onChange={(e) => {
+                    syncPretestSlots(Math.min(20, Math.max(0, Math.trunc(Number(e.target.value) || 0))));
+                    setMarkMatrixApproved(false);
+                  }}
                 />
               </label>
               <label className="field-label">
@@ -1040,7 +1257,10 @@ export function InstantTestStep({
                   className="field"
                   disabled={pretestCount === 0}
                   value={pretestDifficulty}
-                  onChange={(e) => setPretestDifficulty(e.target.value as 'easy' | 'medium' | 'hard' | 'mixed')}
+                  onChange={(e) => {
+                    setPretestDifficulty(e.target.value as 'easy' | 'medium' | 'hard' | 'mixed');
+                    setMarkMatrixApproved(false);
+                  }}
                 >
                   <option value="easy">Easy</option>
                   <option value="medium">Medium</option>
@@ -1057,7 +1277,56 @@ export function InstantTestStep({
                   step="0.5"
                   disabled={pretestCount === 0}
                   value={pretestCount === 0 ? 0 : pretestMarks}
-                  onChange={(e) => setPretestMarks(Math.max(0, Number(e.target.value)))}
+                  onChange={(e) => {
+                    setPretestMarks(Math.max(0, Number(e.target.value)));
+                    setMarkMatrixApproved(false);
+                  }}
+                />
+              </label>
+              <label className="field-label">
+                Post-lab test MCQs (0 = none)
+                <input
+                  className="field mono"
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={posttestCount}
+                  onChange={(e) => {
+                    setPosttestCount(Math.min(20, Math.max(0, Math.trunc(Number(e.target.value) || 0))));
+                    setMarkMatrixApproved(false);
+                  }}
+                />
+              </label>
+              <label className="field-label">
+                Post-lab difficulty
+                <select
+                  className="field"
+                  disabled={posttestCount === 0}
+                  value={posttestDifficulty}
+                  onChange={(e) => {
+                    setPosttestDifficulty(e.target.value as 'easy' | 'medium' | 'hard' | 'mixed');
+                    setMarkMatrixApproved(false);
+                  }}
+                >
+                  <option value="easy">Easy</option>
+                  <option value="medium">Medium</option>
+                  <option value="hard">Hard</option>
+                  <option value="mixed">Mixed</option>
+                </select>
+              </label>
+              <label className="field-label">
+                Post-lab marks (0 = none)
+                <input
+                  className="field mono"
+                  type="number"
+                  min={0}
+                  step="0.5"
+                  disabled={posttestCount === 0}
+                  value={posttestCount === 0 ? 0 : posttestMarks}
+                  onChange={(e) => {
+                    setPosttestMarks(Math.max(0, Number(e.target.value)));
+                    setMarkMatrixApproved(false);
+                  }}
                 />
               </label>
               <label className="field-label">
@@ -1068,9 +1337,71 @@ export function InstantTestStep({
                   min={0}
                   step="0.5"
                   value={vivaMarks}
-                  onChange={(e) => setVivaMarks(Math.max(0, Number(e.target.value)))}
+                  onChange={(e) => {
+                    setVivaMarks(Math.max(0, Number(e.target.value)));
+                    setMarkMatrixApproved(false);
+                  }}
                 />
               </label>
+            </div>
+
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>Mark allocation matrix (approve before fixing proctoring level)</div>
+                {markMatrixApproved ? (
+                  <span className="chip chip-ok">Mark matrix approved</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary field-sm"
+                    onClick={() => setMarkMatrixApproved(true)}
+                  >
+                    Approve mark allocation matrix
+                  </button>
+                )}
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="table" style={{ fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th>Component</th>
+                      <th>Details</th>
+                      <th className="mono">Marks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Pre-test</td>
+                      <td>{pretestCount > 0 ? `${pretestCount} MCQs (${pretestDifficulty})` : 'None'}</td>
+                      <td className="mono">{pretestCount > 0 ? pretestMarks : 0}</td>
+                    </tr>
+                    {Array.from({ length: questionCount }, (_, idx) => (
+                      <tr key={idx}>
+                        <td>Coding Q{idx + 1}</td>
+                        <td>
+                          {slotDifficulties[idx] ?? difficulty} · {visibleCount} visible ({visibleMarks}m) + {hiddenCount} hidden ({hiddenMarks}m)
+                        </td>
+                        <td className="mono">{visibleMarks + hiddenMarks}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td>Post-lab test</td>
+                      <td>{posttestCount > 0 ? `${posttestCount} MCQs (${posttestDifficulty})` : 'None'}</td>
+                      <td className="mono">{posttestCount > 0 ? posttestMarks : 0}</td>
+                    </tr>
+                    <tr>
+                      <td>Viva</td>
+                      <td>{vivaMarks > 0 ? 'Faculty oral evaluation' : 'None'}</td>
+                      <td className="mono">{vivaMarks}</td>
+                    </tr>
+                    <tr style={{ fontWeight: 700, background: 'var(--surface)' }}>
+                      <td>Grand total</td>
+                      <td>{questionCount} coding Qs + assessments</td>
+                      <td className="mono">{computedTotalMarks}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
@@ -1170,6 +1501,7 @@ export function InstantTestStep({
                 Proctoring level
                 <select
                   className="field field-sm"
+                  disabled={!markMatrixApproved}
                   value={proctorLevel}
                   onChange={(e) => {
                     const lvl = Number(e.target.value) as 1 | 2 | 3;
@@ -1191,21 +1523,23 @@ export function InstantTestStep({
               {proctorLevel === 2 ? (
                 <>
                   <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, marginTop: 14 }}>
-                    <input type="checkbox" checked={proctorCamera} onChange={(e) => setProctorCamera(e.target.checked)} />
+                    <input type="checkbox" disabled={!markMatrixApproved} checked={proctorCamera} onChange={(e) => setProctorCamera(e.target.checked)} />
                     Camera + AI rules
                   </label>
                   <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, marginTop: 14 }}>
-                    <input type="checkbox" checked={proctorMic} onChange={(e) => setProctorMic(e.target.checked)} />
+                    <input type="checkbox" disabled={!markMatrixApproved} checked={proctorMic} onChange={(e) => setProctorMic(e.target.checked)} />
                     Microphone + audio rules
                   </label>
                 </>
               ) : null}
-              <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 14 }}>
-                {proctorLevel === 3
-                  ? 'Camera, mic & entire-screen share required'
-                  : proctorLevel === 2
-                    ? 'Entire-screen share & lockdown required; camera/mic optional'
-                    : 'Browser lockdown & code checks only'}
+              <span className="mono" style={{ fontSize: 11.5, color: !markMatrixApproved ? 'var(--danger)' : 'var(--muted)', marginTop: 14 }}>
+                {!markMatrixApproved
+                  ? 'Approve mark allocation matrix above before setting proctoring level'
+                  : proctorLevel === 3
+                    ? 'Camera, mic & entire-screen share required'
+                    : proctorLevel === 2
+                      ? 'Entire-screen share & lockdown required; camera/mic optional'
+                      : 'Browser lockdown & code checks only'}
               </span>
             </div>
 
@@ -1265,10 +1599,38 @@ export function InstantTestStep({
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button type="button" className="btn" disabled={busy} onClick={() => void generateAiBuckets()}>
-              {genProgress || `Generate ${questionCount} × 15 AI question buckets (${questionCount * 15} questions)`}
+            <button type="button" className="btn" disabled={busy} onClick={() => void generateAiBuckets(false)}>
+              {genProgress || `Generate ${bucketTarget} AI questions (50% of ${targetStrength} strength)`}
             </button>
-            <button type="submit" className="btn btn-primary" disabled={busy || questions.length === 0}>
+            {questions.length > 0 && questions.length < bucketTarget ? (
+              <button type="button" className="btn" disabled={busy} onClick={() => void generateAiBuckets(true)}>
+                Regenerate balance ({bucketTarget - questions.length})
+              </button>
+            ) : null}
+            <button type="button" className="btn" disabled={busy} onClick={addManualQuestion}>
+              + Add manual question
+            </button>
+            <label className="btn" style={{ cursor: 'pointer', margin: 0 }}>
+              Upload JSON
+              <input
+                type="file"
+                accept=".json"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleUploadQuestions(file);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            <span className={approvedQuestions.length >= bucketTarget ? 'chip chip-ok' : 'chip'}>
+              Approved: {approvedQuestions.length}/{bucketTarget}
+            </span>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={busy || !markMatrixApproved || approvedQuestions.length < bucketTarget}
+            >
               {busy && !genProgress ? 'Saving…' : activateNow ? 'Publish & activate now' : 'Schedule test & notify students'}
             </button>
           </div>
@@ -1281,42 +1643,70 @@ export function InstantTestStep({
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                  {Array.from({ length: questionCount }, (_, idx) => idx + 1).map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      className={activeSlot === s ? 'btn btn-primary field-sm' : 'btn field-sm'}
-                      onClick={() => {
-                        setActiveSlot(s);
-                        setActiveVariant(1);
-                      }}
-                    >
-                      Q{s} Bucket (15)
-                    </button>
-                  ))}
+                  {Array.from({ length: questionCount }, (_, idx) => idx + 1).map((s) => {
+                    const slotCount = questions.filter((x) => x.slot === s).length;
+                    const slotApproved = questions.filter((x) => x.slot === s && x.approved).length;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        className={activeSlot === s ? 'btn btn-primary field-sm' : 'btn field-sm'}
+                        onClick={() => {
+                          setActiveSlot(s);
+                          setActiveVariant(1);
+                        }}
+                      >
+                        Q{s} Bucket ({slotApproved}/{slotCount})
+                      </button>
+                    );
+                  })}
                   <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 8 }}>Variant:</span>
                   <select
                     className="field field-sm"
-                    value={activeVariant}
+                    value={activeQ.variant}
                     onChange={(e) => setActiveVariant(Number(e.target.value))}
-                    style={{ width: 95 }}
+                    style={{ width: 110 }}
                   >
                     {slotQs.map((v) => (
                       <option key={v.id} value={v.variant}>
-                        #{v.variant}
+                        #{v.variant} {v.approved ? '✓' : v.validated ? '•' : ''}
                       </option>
                     ))}
                   </select>
+                  <span className={activeQ.approved ? 'chip chip-ok' : activeQ.validated ? 'chip' : 'chip chip-warn'}>
+                    {activeQ.approved ? 'Approved' : activeQ.validated ? 'Validated' : 'Needs validation'}
+                  </span>
                 </div>
-                <div style={{ padding: 10, border: '1px solid var(--border)', borderRadius: 6 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 6 }}>
-                    Q{activeQ.slot} · #{activeQ.variant}: {activeQ.title}
+                <div style={{ padding: 10, border: '1px solid var(--border)', borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                    <input
+                      className="field field-sm"
+                      value={activeQ.title}
+                      onChange={(e) => updateQ({ title: e.target.value, validated: false, approved: false })}
+                      style={{ fontWeight: 600, flex: '1 1 240px' }}
+                    />
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button type="button" className="btn field-sm" onClick={() => validateQuestionDraft(activeQ.id)}>
+                        Validate
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary field-sm"
+                        disabled={!activeQ.validated || Boolean(activeQ.approved)}
+                        onClick={() => approveQuestionDraft(activeQ.id)}
+                      >
+                        {activeQ.approved ? 'Approved' : 'Approve'}
+                      </button>
+                      <button type="button" className="btn field-sm" onClick={() => discardQuestionDraft(activeQ.id)}>
+                        Discard
+                      </button>
+                    </div>
                   </div>
                   <textarea
                     className="field"
                     rows={3}
                     value={activeQ.statement}
-                    onChange={(e) => updateQ({ statement: e.target.value })}
+                    onChange={(e) => updateQ({ statement: e.target.value, validated: false, approved: false })}
                     style={{ height: 'auto', padding: 8 }}
                   />
                 </div>
