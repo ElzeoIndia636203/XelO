@@ -72,6 +72,7 @@ const BodySchema = z.discriminatedUnion('kind', [
     co_code: z.string().max(20).optional(),
     visible_count: z.number().int().min(1).max(10),
     hidden_count: z.number().int().min(1).max(10),
+    allowed_langs: z.array(z.string()).max(6).optional(),
     avoid_titles: z.array(z.string()).max(60).optional(),
   }),
   z.object({
@@ -269,10 +270,14 @@ Deno.serve(async (req: Request) => {
       const fallbackDiff =
         parsed.data.difficulty === 'mixed' ? 'medium' : parsed.data.difficulty;
       const avoid = (parsed.data.avoid_titles ?? []).slice(0, 40).join(' | ');
+      const targetLangs = (parsed.data.allowed_langs && parsed.data.allowed_langs.length > 0
+        ? parsed.data.allowed_langs
+        : ((course.allowed_langs as string[] | null) ?? ['c'])
+      ).slice(0, 6);
       const questions = await callLlmJson(
         {
-          system: `You are XeIO Assist. Return ONLY valid JSON {"questions":[...]}. Generate exactly ${bucketSize} distinct, well-defined programming problems for Question Slot ${parsed.data.slot}. Each problem MUST include: title, statement (clear problem definition), input_spec, output_spec, constraints, sample_input, sample_output, difficulty ("easy"|"medium"|"hard"), visible_tests (exact array of ${parsed.data.visible_count} {"input":"...","expected":"..."}), hidden_tests (exact array of ${parsed.data.hidden_count} {"input":"...","expected":"..."}). All test cases must use exact stdin/stdout.`,
-          user: `Course: ${course.code} ${course.title}\nTopic: ${parsed.data.topic}\nDifficulty: ${parsed.data.difficulty}\nCO: ${parsed.data.co_code ?? 'CO1'}\nSlot: ${parsed.data.slot}\nAvoid titles: ${avoid}`,
+          system: `You are XeIO Assist. Return ONLY valid JSON {"questions":[...]}. Generate exactly ${bucketSize} distinct, well-defined programming problems for Question Slot ${parsed.data.slot}. Each problem MUST include: title, statement (clear problem definition), input_spec, output_spec, constraints, sample_input, sample_output, difficulty ("easy"|"medium"|"hard"), visible_tests (exact array of ${parsed.data.visible_count} {"input":"...","expected":"..."}), hidden_tests (exact array of ${parsed.data.hidden_count} {"input":"...","expected":"..."}), and references (object mapping each requested language code [${targetLangs.join(', ')}] to a complete working stdin/stdout reference solution that passes all visible and hidden tests). All test cases must use exact stdin/stdout.`,
+          user: `Course: ${course.code} ${course.title}\nTopic: ${parsed.data.topic}\nDifficulty: ${parsed.data.difficulty}\nCO: ${parsed.data.co_code ?? 'CO1'}\nSlot: ${parsed.data.slot}\nLanguages: ${targetLangs.join(', ')}\nAvoid titles: ${avoid}`,
           maxTokens: 8192,
         },
         (raw) =>

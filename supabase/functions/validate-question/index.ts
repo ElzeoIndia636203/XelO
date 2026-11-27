@@ -5,9 +5,25 @@ import type { AllowedLang } from '../_shared/judge.ts';
 import { resolveLanguageIds, runOnJudge0 } from '../_shared/judge0.ts';
 import { validateQuestionWithRunner } from '../_shared/validate.ts';
 
-const BodySchema = z.object({
-  question_id: z.string().uuid(),
+const TestCaseSchema = z.object({
+  input: z.string(),
+  expected: z.string(),
 });
+
+const BodySchema = z.union([
+  z.object({
+    question_id: z.string().uuid(),
+  }),
+  z.object({
+    draft: z.object({
+      course_id: z.string().uuid(),
+      allowed_langs: z.array(z.string()).min(1).max(6),
+      visible_tests: z.array(TestCaseSchema).min(1).max(20),
+      hidden_tests: z.array(TestCaseSchema).min(1).max(20),
+      references: z.record(z.string()),
+    }),
+  }),
+]);
 
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get('origin');
@@ -33,6 +49,55 @@ Deno.serve(async (req: Request) => {
   }
 
   const admin = adminClient();
+
+  if ('draft' in parsed.data) {
+    const { draft } = parsed.data;
+    const { data: course } = await admin
+      .from('courses')
+      .select('id, faculty_id')
+      .eq('id', draft.course_id)
+      .single();
+
+    if (!course || course.faculty_id !== authData.user.id) {
+      return json({ error: 'forbidden' }, 403, origin);
+    }
+
+    const judgeUrl = Deno.env.get('JUDGE0_URL');
+    if (!judgeUrl) {
+      return json({ error: 'runner_not_configured' }, 503, origin);
+    }
+
+    const langIds = resolveLanguageIds(Deno.env.get('JUDGE0_LANG_IDS'));
+    const judgeKey = Deno.env.get('JUDGE0_API_KEY') ?? undefined;
+    const judgeHeader = Deno.env.get('JUDGE0_AUTH_HEADER') ?? 'X-Auth-Token';
+
+    const tests: Array<{ ord: number; input: string; expected: string; hidden: boolean }> = [
+      ...draft.visible_tests.map((tc, idx) => ({ ord: idx + 1, input: tc.input, expected: tc.expected, hidden: false })),
+      ...draft.hidden_tests.map((tc, idx) => ({ ord: idx + 1, input: tc.input, expected: tc.expected, hidden: true })),
+    ];
+    const references: Partial<Record<AllowedLang, string>> = {};
+    for (const [k, v] of Object.entries(draft.references)) {
+      if (typeof v === 'string' && v.trim()) {
+        references[k.trim().toLowerCase() as AllowedLang] = v;
+      }
+    }
+
+    const result = await validateQuestionWithRunner({
+      allowedLangs: draft.allowed_langs as AllowedLang[],
+      tests,
+      references,
+      runTest: (lang, code, tc) =>
+        runOnJudge0(
+          { baseUrl: judgeUrl, apiKey: judgeKey, authHeader: judgeHeader, langIds },
+          lang,
+          code,
+          tc,
+        ),
+    });
+
+    return json(result, 200, origin);
+  }
+
   const { data: question } = await admin
     .from('questions')
     .select('id, course_id, session_id, institution_id')

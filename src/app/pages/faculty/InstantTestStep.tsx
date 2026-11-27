@@ -29,7 +29,9 @@ interface InstantQuestionDraft {
   hidden_marks: number;
   visible_tests: InstantTestCase[];
   hidden_tests: InstantTestCase[];
+  references?: Record<string, string>;
   validated?: boolean;
+  validation_note?: string;
   approved?: boolean;
 }
 
@@ -191,6 +193,8 @@ export function InstantTestStep({
   const [questions, setQuestions] = useState<InstantQuestionDraft[]>([]);
   const [activeSlot, setActiveSlot] = useState(1);
   const [activeVariant, setActiveVariant] = useState(1);
+  const [activeRefLang, setActiveRefLang] = useState<string>('c');
+  const [validatingId, setValidatingId] = useState<string | null>(null);
   const [genProgress, setGenProgress] = useState('');
 
   const [tests, setTests] = useState<InstantTestRow[]>([]);
@@ -374,6 +378,7 @@ export function InstantTestStep({
               difficulty: 'easy' | 'medium' | 'hard';
               visible_tests: InstantTestCase[];
               hidden_tests: InstantTestCase[];
+              references?: Record<string, string>;
             }>;
           } | null = null;
 
@@ -391,6 +396,7 @@ export function InstantTestStep({
                   difficulty: 'easy' | 'medium' | 'hard';
                   visible_tests: InstantTestCase[];
                   hidden_tests: InstantTestCase[];
+                  references?: Record<string, string>;
                 }>;
               }>('ai-generate', {
                 kind: 'instant_test_bucket',
@@ -402,6 +408,7 @@ export function InstantTestStep({
                 co_code: getSlotCo(slot)?.code ?? 'CO1',
                 visible_count: visibleCount,
                 hidden_count: hiddenCount,
+                allowed_langs: langs,
                 avoid_titles: avoidTitles,
               });
               break;
@@ -441,6 +448,7 @@ export function InstantTestStep({
               hidden_marks: hiddenMarks,
               visible_tests: item.visible_tests,
               hidden_tests: item.hidden_tests,
+              references: item.references ?? {},
               validated: false,
               approved: false,
             });
@@ -490,6 +498,7 @@ export function InstantTestStep({
       hidden_marks: hiddenMarks,
       visible_tests: Array.from({ length: visibleCount }, () => ({ input: '', expected: '' })),
       hidden_tests: Array.from({ length: hiddenCount }, () => ({ input: '', expected: '' })),
+      references: {},
       validated: false,
       approved: false,
     };
@@ -543,7 +552,7 @@ export function InstantTestStep({
     }
   }
 
-  function validateQuestionDraft(qId: string) {
+  async function validateQuestionDraft(qId: string) {
     const q = questions.find((x) => x.id === qId);
     if (!q) return;
     if (!q.title.trim() || !q.statement.trim() || q.visible_tests.length < 1 || q.hidden_tests.length < 1) {
@@ -554,8 +563,41 @@ export function InstantTestStep({
       onNotify('All visible and hidden test cases must have expected output.', false);
       return;
     }
-    setQuestions((prev) => prev.map((x) => (x.id === qId ? { ...x, validated: true } : x)));
-    onNotify(`Validated "${q.title}". You can now approve it.`, true);
+    const refs = q.references ?? {};
+    const missingLangs = langs.filter((l) => !refs[l]?.trim());
+    if (missingLangs.length > 0) {
+      onNotify(`Reference solution code is required for: ${missingLangs.join(', ')}`, false);
+      return;
+    }
+    setValidatingId(qId);
+    try {
+      const res = await fn<{ valid: boolean; validation_note: string }>('validate-question', {
+        draft: {
+          course_id: course.id,
+          allowed_langs: langs,
+          visible_tests: q.visible_tests,
+          hidden_tests: q.hidden_tests,
+          references: refs,
+        },
+      });
+      setQuestions((prev) =>
+        prev.map((x) =>
+          x.id === qId
+            ? { ...x, validated: res.valid, validation_note: res.validation_note, approved: res.valid ? x.approved : false }
+            : x,
+        ),
+      );
+      onNotify(
+        res.valid
+          ? `Validated "${q.title}": ${res.validation_note}`
+          : `Validation failed for "${q.title}": ${res.validation_note}`,
+        res.valid,
+      );
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setValidatingId(null);
+    }
   }
 
   function approveQuestionDraft(qId: string) {
@@ -1759,8 +1801,13 @@ export function InstantTestStep({
                       style={{ fontWeight: 600, flex: '1 1 240px' }}
                     />
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <button type="button" className="btn field-sm" onClick={() => validateQuestionDraft(activeQ.id)}>
-                        Validate
+                      <button
+                        type="button"
+                        className="btn field-sm"
+                        disabled={validatingId === activeQ.id}
+                        onClick={() => void validateQuestionDraft(activeQ.id)}
+                      >
+                        {validatingId === activeQ.id ? 'Validating…' : 'Validate'}
                       </button>
                       <button
                         type="button"
@@ -1775,6 +1822,20 @@ export function InstantTestStep({
                       </button>
                     </div>
                   </div>
+                  {activeQ.validation_note ? (
+                    <div
+                      className="mono"
+                      style={{
+                        fontSize: 11.5,
+                        padding: '6px 8px',
+                        borderRadius: 4,
+                        background: activeQ.validated ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                        color: activeQ.validated ? 'var(--ok)' : 'var(--danger)',
+                      }}
+                    >
+                      {activeQ.validation_note}
+                    </div>
+                  ) : null}
                   <textarea
                     className="field"
                     rows={3}
@@ -1782,6 +1843,105 @@ export function InstantTestStep({
                     onChange={(e) => updateQ({ statement: e.target.value, validated: false, approved: false })}
                     style={{ height: 'auto', padding: 8 }}
                   />
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>Visible test cases ({activeQ.visible_tests.length})</div>
+                      {activeQ.visible_tests.map((tc, ti) => (
+                        <div key={ti} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                          <textarea
+                            className="field mono"
+                            rows={2}
+                            placeholder={`Visible #${ti + 1} stdin`}
+                            value={tc.input}
+                            onChange={(e) => {
+                              const next = activeQ.visible_tests.map((x, xi) => (xi === ti ? { ...x, input: e.target.value } : x));
+                              updateQ({ visible_tests: next, validated: false, approved: false });
+                            }}
+                            style={{ height: 'auto', padding: 6, fontSize: 11.5 }}
+                          />
+                          <textarea
+                            className="field mono"
+                            rows={2}
+                            placeholder={`Visible #${ti + 1} expected`}
+                            value={tc.expected}
+                            onChange={(e) => {
+                              const next = activeQ.visible_tests.map((x, xi) => (xi === ti ? { ...x, expected: e.target.value } : x));
+                              updateQ({ visible_tests: next, validated: false, approved: false });
+                            }}
+                            style={{ height: 'auto', padding: 6, fontSize: 11.5 }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>Hidden test cases ({activeQ.hidden_tests.length})</div>
+                      {activeQ.hidden_tests.map((tc, ti) => (
+                        <div key={ti} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                          <textarea
+                            className="field mono"
+                            rows={2}
+                            placeholder={`Hidden #${ti + 1} stdin`}
+                            value={tc.input}
+                            onChange={(e) => {
+                              const next = activeQ.hidden_tests.map((x, xi) => (xi === ti ? { ...x, input: e.target.value } : x));
+                              updateQ({ hidden_tests: next, validated: false, approved: false });
+                            }}
+                            style={{ height: 'auto', padding: 6, fontSize: 11.5 }}
+                          />
+                          <textarea
+                            className="field mono"
+                            rows={2}
+                            placeholder={`Hidden #${ti + 1} expected`}
+                            value={tc.expected}
+                            onChange={(e) => {
+                              const next = activeQ.hidden_tests.map((x, xi) => (xi === ti ? { ...x, expected: e.target.value } : x));
+                              updateQ({ hidden_tests: next, validated: false, approved: false });
+                            }}
+                            style={{ height: 'auto', padding: 6, fontSize: 11.5 }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>Reference solution code</span>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {langs.map((l) => {
+                          const selectedRefLang = langs.includes(activeRefLang) ? activeRefLang : (langs[0] ?? 'c');
+                          return (
+                            <button
+                              key={l}
+                              type="button"
+                              className={selectedRefLang === l ? 'btn btn-primary field-sm' : 'btn field-sm'}
+                              onClick={() => setActiveRefLang(l)}
+                            >
+                              {l.toUpperCase()}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {(() => {
+                      const selectedRefLang = langs.includes(activeRefLang) ? activeRefLang : (langs[0] ?? 'c');
+                      return (
+                        <textarea
+                          className="field mono"
+                          rows={6}
+                          placeholder={`Enter ${selectedRefLang.toUpperCase()} reference solution (reads stdin, prints stdout)`}
+                          value={activeQ.references?.[selectedRefLang] ?? ''}
+                          onChange={(e) =>
+                            updateQ({
+                              references: { ...(activeQ.references ?? {}), [selectedRefLang]: e.target.value },
+                              validated: false,
+                              approved: false,
+                            })
+                          }
+                          style={{ height: 'auto', padding: 8, fontSize: 12 }}
+                        />
+                      );
+                    })()}
+                  </div>
                 </div>
               </div>
             );

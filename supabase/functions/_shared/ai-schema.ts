@@ -472,6 +472,7 @@ export interface InstantBucketQuestionDraft {
   difficulty: 'easy' | 'medium' | 'hard';
   visible_tests: { input: string; expected: string }[];
   hidden_tests: { input: string; expected: string }[];
+  references?: Record<string, string>;
 }
 
 export function validateInstantBucketDraft(
@@ -518,6 +519,15 @@ export function validateInstantBucketDraft(
       throw new Error('invalid_ai_shape');
     }
 
+    const references: Record<string, string> = {};
+    if (row.references && typeof row.references === 'object') {
+      for (const [k, v] of Object.entries(row.references as Record<string, unknown>)) {
+        if (typeof v === 'string' && v.trim()) {
+          references[k.trim().toLowerCase()] = v;
+        }
+      }
+    }
+
     out.push({
       title,
       statement,
@@ -529,6 +539,7 @@ export function validateInstantBucketDraft(
       difficulty,
       visible_tests,
       hidden_tests,
+      references,
     });
   }
 
