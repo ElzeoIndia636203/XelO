@@ -329,6 +329,22 @@ export function BatchesStep({
     }
   }
 
+  async function deleteBatch(b: Batch, memberCount: number) {
+    const extra = memberCount > 0 ? ` and unenroll its ${memberCount} student(s)` : '';
+    if (!window.confirm(`Delete ${b.name}${extra}? This cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      await rpc('delete_course_batch', { p_batch_id: b.id });
+      setSelectedKeys([]);
+      onNotify(`Deleted ${b.name}.`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const previewSplit = splitRosterEvenly(parsedRows, 65);
 
   return (
@@ -635,7 +651,19 @@ export function BatchesStep({
                   ? `${b.name} · ${members.length} of ${allMembers.length} students`
                   : `${b.name} · ${allMembers.length} students`
               }
-              actions={<Chip tone="neutral">Code: {b.class_code}</Chip>}
+              actions={
+                <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                  <Chip tone="neutral">Code: {b.class_code}</Chip>
+                  <button
+                    type="button"
+                    className="btn field-sm"
+                    disabled={hasConductedSession || busy}
+                    onClick={() => void deleteBatch(b, allMembers.length)}
+                  >
+                    Delete batch
+                  </button>
+                </div>
+              }
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
