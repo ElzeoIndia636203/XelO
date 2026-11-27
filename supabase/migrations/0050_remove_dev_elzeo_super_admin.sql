@@ -1,5 +1,10 @@
 -- Allow dev.elzeo@flyy4.com to be invited as faculty/HOD by removing its
--- hardcoded super_admin invite and protection rule.
+-- hardcoded super_admin invite and protection rule, and normalize any
+-- institution email_domain stored with a leading '@'.
+
+UPDATE public.institutions
+SET email_domain = lower(ltrim(btrim(email_domain), '@'))
+WHERE email_domain LIKE '@%';
 
 DELETE FROM public.invites
 WHERE lower(email) = 'dev.elzeo@flyy4.com';

@@ -64,7 +64,7 @@ export function InstitutionsTab({
     try {
       await rpc('admin_create_institution', {
         p_name: instName,
-        p_email_domain: instDomain,
+        p_email_domain: instDomain.trim().replace(/^@+/, '').toLowerCase(),
       });
       setInstName('');
       setInstDomain('');
