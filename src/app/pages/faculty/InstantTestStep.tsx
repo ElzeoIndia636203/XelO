@@ -230,8 +230,16 @@ export function InstantTestStep({
       : scopeType === 'batch'
         ? enrollments.filter((e) => targetBatchIds.includes(e.batch_id)).length
         : targetStudentIds.length;
-  const bucketTarget = Math.max(questionCount, Math.ceil(Math.max(1, targetStrength) * 0.5));
+  const perBucketTarget = Math.max(
+    questionCount,
+    Math.ceil(Math.ceil(Math.max(1, targetStrength) * 0.5) / questionCount),
+  );
+  const bucketTarget = perBucketTarget * questionCount;
+  const approveTarget = Math.max(questionCount, Math.ceil(Math.max(1, targetStrength) * 0.5));
   const approvedQuestions = questions.filter((q) => q.approved);
+  const allSlotsHaveApproved = Array.from({ length: questionCount }, (_, idx) =>
+    approvedQuestions.some((q) => q.slot === idx + 1),
+  ).every(Boolean);
   const computedTotalMarks = Number(
     (
       (pretestCount > 0 ? pretestMarks : 0) +
@@ -334,36 +342,39 @@ export function InstantTestStep({
       onNotify('At least 1 visible and 1 hidden test case are required.', false);
       return;
     }
-    const needTotal = regenerateBalanceOnly ? Math.max(0, bucketTarget - questions.length) : bucketTarget;
+    const existing = regenerateBalanceOnly ? [...questions] : [];
+    const slotNeeds = Array.from({ length: questionCount }, (_, idx) => {
+      const s = idx + 1;
+      const inSlot = regenerateBalanceOnly ? existing.filter((q) => q.slot === s).length : 0;
+      return Math.max(0, perBucketTarget - inSlot);
+    });
+    const needTotal = slotNeeds.reduce((a, b) => a + b, 0);
     if (needTotal <= 0) {
-      onNotify(`Bucket already has ${questions.length}/${bucketTarget} questions.`, true);
+      onNotify(`All ${questionCount} buckets already have ${perBucketTarget} questions each.`, true);
       return;
     }
 
     setBusy(true);
     const perQMarks = Number((visibleMarks + hiddenMarks).toFixed(2));
-    const existing = regenerateBalanceOnly ? [...questions] : [];
     const allBuilt: InstantQuestionDraft[] = [...existing];
     const avoidTitles: string[] = existing.map((q) => q.title);
 
     try {
-      let remaining = needTotal;
       let chunkCalls = 0;
-      for (let slot = 1; slot <= questionCount && remaining > 0; slot++) {
-        const slotTarget = regenerateBalanceOnly
-          ? Math.ceil(remaining / (questionCount - slot + 1))
-          : Math.min(remaining, Math.max(1, Math.ceil(bucketTarget / questionCount)));
+      for (let slot = 1; slot <= questionCount; slot++) {
+        const slotTarget = slotNeeds[slot - 1] ?? 0;
+        if (slotTarget <= 0) continue;
         const slotDiff = questionCount > 1 ? (slotDifficulties[slot - 1] ?? difficulty) : difficulty;
         let slotBuilt = 0;
 
-        while (slotBuilt < slotTarget && remaining > 0) {
+        while (slotBuilt < slotTarget) {
           if (chunkCalls > 0) {
             await new Promise((r) => setTimeout(r, 1200));
           }
           chunkCalls += 1;
-          const chunk = Math.min(5, slotTarget - slotBuilt, remaining);
+          const chunk = Math.min(5, slotTarget - slotBuilt);
           setGenProgress(
-            `Generating AI questions for Q${slot} (${allBuilt.length}/${bucketTarget} in bucket)…`,
+            `Generating AI questions for Q${slot} (${allBuilt.length}/${bucketTarget} total)…`,
           );
 
           let res: {
@@ -454,7 +465,6 @@ export function InstantTestStep({
             });
           }
           slotBuilt += res.questions.length;
-          remaining -= res.questions.length;
           if (res.questions.length === 0) break;
         }
       }
@@ -619,8 +629,8 @@ export function InstantTestStep({
       onNotify('Approve the Mark Allocation Matrix before publishing.', false);
       return;
     }
-    if (!topic.trim() || approvedQuestions.length < bucketTarget) {
-      onNotify(`Validate and approve at least ${bucketTarget} questions (50% of ${targetStrength} strength) before saving.`, false);
+    if (!topic.trim() || approvedQuestions.length < approveTarget || !allSlotsHaveApproved) {
+      onNotify(`Validate and approve at least 1 question from every bucket (${approveTarget} total) before saving.`, false);
       return;
     }
     if (visibleCount < 1 || hiddenCount < 1 || approvedQuestions.some((q) => q.visible_tests.length < 1 || q.hidden_tests.length < 1)) {
@@ -1715,7 +1725,7 @@ export function InstantTestStep({
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <button type="button" className="btn" disabled={busy} onClick={() => void generateAiBuckets(false)}>
-              {genProgress || `Generate ${bucketTarget} AI questions (50% of ${targetStrength} strength)`}
+              {genProgress || `Generate ${bucketTarget} AI questions (${questionCount} buckets × ${perBucketTarget} each)`}
             </button>
             {questions.length > 0 && questions.length < bucketTarget ? (
               <button type="button" className="btn" disabled={busy} onClick={() => void generateAiBuckets(true)}>
@@ -1738,13 +1748,13 @@ export function InstantTestStep({
                 }}
               />
             </label>
-            <span className={approvedQuestions.length >= bucketTarget ? 'chip chip-ok' : 'chip'}>
-              Approved: {approvedQuestions.length}/{bucketTarget}
+            <span className={approvedQuestions.length >= approveTarget && allSlotsHaveApproved ? 'chip chip-ok' : 'chip'}>
+              Approved: {approvedQuestions.length}/{approveTarget}
             </span>
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={busy || !markMatrixApproved || approvedQuestions.length < bucketTarget}
+              disabled={busy || !markMatrixApproved || approvedQuestions.length < approveTarget || !allSlotsHaveApproved}
             >
               {busy && !genProgress ? 'Saving…' : activateNow ? 'Publish & activate now' : 'Schedule test & notify students'}
             </button>
@@ -1752,9 +1762,11 @@ export function InstantTestStep({
 
           {questions.length > 0 && (() => {
             const slotQs = questions.filter((x) => x.slot === activeSlot);
-            const activeQ = slotQs.find((x) => x.variant === activeVariant) ?? slotQs[0] ?? questions[0]!;
-            const updateQ = (patch: Partial<InstantQuestionDraft>) =>
+            const activeQ = slotQs.find((x) => x.variant === activeVariant) ?? slotQs[0] ?? null;
+            const updateQ = (patch: Partial<InstantQuestionDraft>) => {
+              if (!activeQ) return;
               setQuestions((prev) => prev.map((x) => (x.id === activeQ.id ? { ...x, ...patch } : x)));
+            };
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -1775,23 +1787,32 @@ export function InstantTestStep({
                       </button>
                     );
                   })}
-                  <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 8 }}>Variant:</span>
-                  <select
-                    className="field field-sm"
-                    value={activeQ.variant}
-                    onChange={(e) => setActiveVariant(Number(e.target.value))}
-                    style={{ width: 110 }}
-                  >
-                    {slotQs.map((v) => (
-                      <option key={v.id} value={v.variant}>
-                        #{v.variant} {v.approved ? '✓' : v.validated ? '•' : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <span className={activeQ.approved ? 'chip chip-ok' : activeQ.validated ? 'chip' : 'chip chip-warn'}>
-                    {activeQ.approved ? 'Approved' : activeQ.validated ? 'Validated' : 'Needs validation'}
-                  </span>
+                  {activeQ ? (
+                    <>
+                      <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 8 }}>Variant:</span>
+                      <select
+                        className="field field-sm"
+                        value={activeQ.variant}
+                        onChange={(e) => setActiveVariant(Number(e.target.value))}
+                        style={{ width: 110 }}
+                      >
+                        {slotQs.map((v) => (
+                          <option key={v.id} value={v.variant}>
+                            #{v.variant} {v.approved ? '✓' : v.validated ? '•' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <span className={activeQ.approved ? 'chip chip-ok' : activeQ.validated ? 'chip' : 'chip chip-warn'}>
+                        {activeQ.approved ? 'Approved' : activeQ.validated ? 'Validated' : 'Needs validation'}
+                      </span>
+                    </>
+                  ) : null}
                 </div>
+                {!activeQ ? (
+                  <div className="muted" style={{ fontSize: 12.5, padding: 10, border: '1px dashed var(--border)', borderRadius: 6 }}>
+                    No questions in Q{activeSlot} Bucket yet. Click Regenerate balance or + Add manual question.
+                  </div>
+                ) : (
                 <div style={{ padding: 10, border: '1px solid var(--border)', borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                     <input
@@ -1943,6 +1964,7 @@ export function InstantTestStep({
                     })()}
                   </div>
                 </div>
+                )}
               </div>
             );
           })()}
