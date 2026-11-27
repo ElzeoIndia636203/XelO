@@ -35,8 +35,8 @@ function languageExtension(lang: SupportedLang) {
 const xeioDarkTheme = EditorView.theme(
   {
     '&': {
-      backgroundColor: '#282C34',
-      color: '#ABB2BF',
+      backgroundColor: '#0B1120',
+      color: '#F1F5F9',
       height: '100%',
       fontSize: '13px',
       fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
@@ -47,46 +47,44 @@ const xeioDarkTheme = EditorView.theme(
       lineHeight: '1.6',
     },
     '.cm-gutters': {
-      backgroundColor: '#282C34',
-      color: '#5C6370',
+      backgroundColor: '#0B1120',
+      color: '#475569',
       border: 'none',
       paddingRight: '8px',
     },
     '.cm-activeLineGutter': {
-      backgroundColor: '#2C313C',
-      color: '#ABB2BF',
+      backgroundColor: '#131C31',
+      color: '#94A3B8',
     },
     '.cm-activeLine': {
-      backgroundColor: '#2C313C',
+      backgroundColor: '#131C31',
     },
     '&.cm-focused': {
-      outline: '2px solid #3FA9F5',
+      outline: '2px solid #38BDF8',
       outlineOffset: '-2px',
     },
     '.cm-cursor': {
       borderLeftColor: '#FFFFFF',
     },
     '.cm-selectionBackground, ::selection': {
-      backgroundColor: '#3E4451',
+      backgroundColor: '#1E3A5F',
     },
   },
   { dark: true },
 );
 
 const xeioHighlight = HighlightStyle.define([
-  { tag: tags.keyword, color: '#61AFEF' },
-  { tag: tags.controlKeyword, color: '#C678DD' },
-  { tag: [tags.meta, tags.processingInstruction, tags.special(tags.string)], color: '#7F848E' },
-  { tag: tags.comment, color: '#7F848E', fontStyle: 'italic' },
-  { tag: [tags.string, tags.character], color: '#98C379' },
-  { tag: [tags.number, tags.integer, tags.float], color: '#D19A66' },
-  { tag: [tags.bool, tags.null], color: '#D19A66' },
-  { tag: [tags.typeName, tags.standard(tags.typeName)], color: '#56B6C2' },
-  { tag: tags.function(tags.variableName), color: '#E5C07B' },
-  { tag: tags.variableName, color: '#ABB2BF' },
-  { tag: [tags.brace, tags.paren], color: '#E5C07B' },
-  { tag: tags.squareBracket, color: '#61AFEF' },
-  { tag: [tags.operator, tags.punctuation], color: '#ABB2BF' },
+  { tag: [tags.keyword, tags.controlKeyword], color: '#60A5FA' },
+  { tag: [tags.meta, tags.processingInstruction, tags.special(tags.string)], color: '#7DD3FC' },
+  { tag: tags.comment, color: '#94A3B8', fontStyle: 'italic' },
+  { tag: [tags.string, tags.character], color: '#4ADE80' },
+  { tag: [tags.number, tags.integer, tags.float, tags.bool, tags.null], color: '#FBBF24' },
+  { tag: [tags.typeName, tags.standard(tags.typeName)], color: '#38BDF8' },
+  { tag: tags.function(tags.variableName), color: '#F8FAFC' },
+  { tag: tags.variableName, color: '#E2E8F0' },
+  { tag: [tags.brace, tags.paren], color: '#FBBF24' },
+  { tag: tags.squareBracket, color: '#60A5FA' },
+  { tag: [tags.operator, tags.punctuation], color: '#CBD5E1' },
 ]);
 
 export function CodeEditor({
