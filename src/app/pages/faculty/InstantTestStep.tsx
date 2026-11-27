@@ -290,7 +290,7 @@ export function InstantTestStep({
 
     try {
       for (let slot = 1; slot <= questionCount; slot++) {
-        setGenProgress(`Generating 15-question AI bucket for Question ${slot} of ${questionCount}…`);
+        setGenProgress(`Generating AI question variants for Question ${slot} of ${questionCount}…`);
         const res = await fn<{
           questions: Array<{
             title: string;
@@ -309,7 +309,7 @@ export function InstantTestStep({
           course_id: course.id,
           topic: topic.trim(),
           slot,
-          bucket_size: 15,
+          bucket_size: 5,
           difficulty,
           co_code: selectedCo?.code ?? 'CO1',
           visible_count: visibleCount,
@@ -344,7 +344,7 @@ export function InstantTestStep({
       setQuestions(allBuilt);
       setActiveSlot(1);
       setActiveVariant(1);
-      onNotify(`Generated ${questionCount} × 15 (${allBuilt.length}) AI questions.`, true);
+      onNotify(`Generated ${allBuilt.length} AI questions (${questionCount} slots × 5 variants).`, true);
     } catch (err) {
       onNotify(errorMessage(err), false);
     } finally {

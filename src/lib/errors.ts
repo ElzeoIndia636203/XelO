@@ -62,6 +62,8 @@ const MESSAGES: Record<string, string> = {
   'email rate limit exceeded': 'Too many sign-in emails sent. Please wait a few minutes and try again.',
   'Token has expired or is invalid': 'That sign-in code or link has expired or is invalid. Request a new one.',
   otp_expired: 'That sign-in code or link has expired. Request a new one.',
+  'Failed to send a request to the Edge Function': 'Could not reach the backend service. Please try again.',
+  'Edge Function returned a non-2xx status code': 'The AI/execution service timed out or returned an error. Please try again.',
 };
 
 export function errorMessage(err: unknown): string {
