@@ -55,6 +55,7 @@ const MESSAGES: Record<string, string> = {
   join_request_rejected: 'Your join request was declined by faculty.',
   test_not_active: 'This test is not active yet.',
   marked_absent: 'You are marked absent for this test.',
+  attendance_not_marked: 'Mark your attendance to attend this test. Contact your faculty to proceed.',
   second_reviewer_required: 'A second reviewer must be selected before confirming misconduct.',
   max_resets_reached: 'Maximum of 2 faculty resets reached for this student.',
   cheating_terminated: 'Cannot reset an attempt that was terminated for cheating.',

@@ -334,3 +334,81 @@ DROP POLICY IF EXISTS notifications_delete ON public.notifications;
 CREATE POLICY notifications_delete ON public.notifications
   FOR DELETE TO authenticated
   USING (user_id = auth.uid());
+
+-- Enforce attendance_status = 'present' before a student can start a course instant test
+CREATE OR REPLACE FUNCTION student_start_course_instant_test(p_test_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_me public.profiles%ROWTYPE;
+  v_t public.instant_tests%ROWTYPE;
+  v_pt public.instant_test_participants%ROWTYPE;
+  v_attempt public.instant_test_attempts%ROWTYPE;
+  v_prn text;
+  v_name text;
+  v_picked text[];
+BEGIN
+  SELECT * INTO v_me FROM public.profiles WHERE id = auth.uid() AND active = true;
+  IF NOT FOUND OR v_me.role <> 'student' THEN
+    RAISE EXCEPTION 'forbidden';
+  END IF;
+
+  SELECT * INTO v_t FROM public.instant_tests WHERE id = p_test_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'not_found';
+  END IF;
+
+  IF v_t.status <> 'active' OR v_t.active <> true THEN
+    RAISE EXCEPTION 'test_not_active';
+  END IF;
+
+  SELECT * INTO v_pt
+  FROM public.instant_test_participants
+  WHERE test_id = v_t.id AND student_id = v_me.id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'forbidden';
+  END IF;
+
+  IF v_pt.approval_status = 'pending' THEN
+    RAISE EXCEPTION 'pending_faculty_approval';
+  END IF;
+
+  IF v_pt.approval_status = 'rejected' THEN
+    RAISE EXCEPTION 'join_request_rejected';
+  END IF;
+
+  IF v_pt.attendance_status = 'absent' THEN
+    RAISE EXCEPTION 'marked_absent';
+  END IF;
+
+  IF v_pt.attendance_status <> 'present' THEN
+    RAISE EXCEPTION 'attendance_not_marked';
+  END IF;
+
+  v_prn := coalesce(NULLIF(trim(coalesce(v_pt.requested_prn, '')), ''), NULLIF(trim(coalesce(v_me.roll_no, '')), ''), v_me.email);
+  v_name := coalesce(NULLIF(trim(coalesce(v_pt.requested_name, '')), ''), NULLIF(trim(coalesce(v_me.full_name, '')), ''), v_me.email);
+  v_picked := public.pick_instant_question_ids(v_t.questions, v_t.question_count);
+
+  INSERT INTO public.instant_test_attempts (
+    test_id, institution_id, student_id, prn, student_name, assigned_question_ids
+  ) VALUES (
+    v_t.id, v_t.institution_id, v_me.id, v_prn, v_name, v_picked
+  )
+  ON CONFLICT (test_id, student_id) DO UPDATE
+    SET assigned_question_ids = CASE
+      WHEN coalesce(array_length(public.instant_test_attempts.assigned_question_ids, 1), 0) > 0
+      THEN public.instant_test_attempts.assigned_question_ids
+      ELSE EXCLUDED.assigned_question_ids
+    END
+  RETURNING * INTO v_attempt;
+
+  RETURN jsonb_build_object(
+    'attempt_id', v_attempt.id,
+    'test_id', v_t.id
+  );
+END;
+$$;

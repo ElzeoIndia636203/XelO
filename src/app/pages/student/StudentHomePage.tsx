@@ -406,7 +406,8 @@ export function StudentHomePage() {
               {liveInstantTests.map((t) => {
                 const isLive = t.status === 'active' && t.active;
                 const approval = t.approval_status ?? 'approved';
-                const canEnter = approval === 'approved' && isLive;
+                const attendancePresent = t.attendance_status === 'present';
+                const canEnter = approval === 'approved' && isLive && attendancePresent;
                 return (
                   <button
                     key={t.test_id}
@@ -414,6 +415,16 @@ export function StudentHomePage() {
                     disabled={launchingTestId === t.test_id || approval === 'pending' || approval === 'rejected'}
                     onClick={async () => {
                       if (approval !== 'approved') return;
+                      if (!attendancePresent) {
+                        setJoinMsg({
+                          text:
+                            t.attendance_status === 'absent'
+                              ? 'You are marked absent for this test. Contact your faculty to proceed.'
+                              : 'Mark your attendance to attend this test. Contact your faculty to proceed.',
+                          ok: false,
+                        });
+                        return;
+                      }
                       if (t.attempt_id) {
                         navigate(`/student/instant-test/${t.attempt_id}`);
                         return;
@@ -458,18 +469,26 @@ export function StudentHomePage() {
                         {t.scheduled_at ? ` · ${formatDateTimeIst(t.scheduled_at)}` : ''}
                         {t.marks_approved && t.final_score !== null ? ` · Final: ${t.final_score}/${t.total_marks}` : ''}
                       </div>
+                      {isLive && !attendancePresent ? (
+                        <div style={{ fontSize: 12, color: '#991B1B', fontWeight: 500, marginTop: 4 }}>
+                          Mark your attendance to attend this test. Contact your faculty to proceed.
+                        </div>
+                      ) : null}
                     </div>
                     <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                       {approval === 'pending' ? (
                         <Chip tone="warn">Pending faculty approval</Chip>
                       ) : approval === 'rejected' ? (
                         <Chip tone="bad">Declined</Chip>
+                      ) : isLive && !attendancePresent ? (
+                        <Chip tone={t.attendance_status === 'absent' ? 'bad' : 'warn'}>
+                          {t.attendance_status === 'absent' ? 'Absent' : 'Attendance not marked'}
+                        </Chip>
                       ) : (
                         <Chip tone={canEnter ? 'good' : t.status === 'scheduled' ? 'warn' : 'neutral'}>
                           {canEnter ? 'Live · Open portal' : t.status}
                         </Chip>
                       )}
-                      {t.attendance_status === 'absent' ? <Chip tone="bad">Absent</Chip> : null}
                     </div>
                   </button>
                 );
