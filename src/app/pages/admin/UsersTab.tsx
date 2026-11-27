@@ -131,8 +131,9 @@ export function UsersTab({
       onNotify('Faculty and staff cannot be onboarded with a personal email address.', false);
       return;
     }
-    if (dom !== selectedInst.email_domain.toLowerCase()) {
-      onNotify(`Enter a valid @${selectedInst.email_domain} email address.`, false);
+    const instDom = selectedInst.email_domain.trim().replace(/^@+/, '').toLowerCase();
+    if (dom !== instDom) {
+      onNotify(`Enter a valid @${instDom} email address.`, false);
       return;
     }
 
@@ -314,7 +315,7 @@ export function UsersTab({
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder={selectedInst ? `name@${selectedInst.email_domain}` : 'name@university.edu'}
+              placeholder={selectedInst ? `name@${selectedInst.email_domain.replace(/^@+/, '')}` : 'name@university.edu'}
               style={{ width: 220 }}
             />
           </label>
