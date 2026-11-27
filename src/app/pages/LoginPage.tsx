@@ -134,11 +134,19 @@ export function LoginPage() {
     setLocalError(null);
     setAuthError(null);
     try {
-      const { error } = await supabase.auth.verifyOtp({
+      let { error } = await supabase.auth.verifyOtp({
         email: otpSentEmail,
         token: otpCode.trim(),
         type: 'email',
       });
+      if (error) {
+        const retry = await supabase.auth.verifyOtp({
+          email: otpSentEmail,
+          token: otpCode.trim(),
+          type: 'signup',
+        });
+        error = retry.error;
+      }
       if (error) {
         setLocalError(errorMessage(error.message));
       } else {
@@ -322,7 +330,7 @@ export function LoginPage() {
               className="field mono"
               value={otpCode}
               onChange={(e) => setOtpCode(e.target.value)}
-              placeholder="6-digit code from email"
+              placeholder="Verification code from email"
               style={{ flex: 1, height: 40 }}
             />
             <button
