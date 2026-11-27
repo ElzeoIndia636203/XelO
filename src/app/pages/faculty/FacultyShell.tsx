@@ -106,6 +106,7 @@ export function FacultyShell({
   const { profile } = useSession();
   const [cmd, setCmd] = useState('');
   const [askReply, setAskReply] = useState<string | null>(null);
+  const [railHidden, setRailHidden] = useState(false);
 
   const planApproved = course.plan_status === 'approved';
   const activeCount = sessions.filter((s) => s.status === 'active' || s.status === 'conducted').length;
@@ -257,7 +258,12 @@ export function FacultyShell({
 
   return (
     <div className="console-wrap">
-      <aside className="console-rail dark-surface no-print" aria-label="Lab lifecycle" style={{ maxWidth: 272 }}>
+      <aside
+        className="console-rail dark-surface no-print"
+        aria-label="Lab lifecycle"
+        data-collapsed={railHidden ? 'true' : 'false'}
+        aria-hidden={railHidden}
+      >
         <div style={{ padding: '0 6px', display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div style={{ fontSize: 20, lineHeight: 1.2 }}>
             <Wordmark dark sub="Assist" />
@@ -419,6 +425,14 @@ export function FacultyShell({
             background: 'var(--surface-alt)',
           }}
         >
+          <button
+            type="button"
+            className="btn field-sm"
+            aria-expanded={!railHidden}
+            onClick={() => setRailHidden((v) => !v)}
+          >
+            {railHidden ? 'Show panel' : 'Hide panel'}
+          </button>
           <form onSubmit={handleAsk} style={{ flex: '1 1 320px', display: 'flex', gap: 8 }}>
             <label htmlFor="ask-assist" style={{ position: 'absolute', left: -9999 }}>
               Ask Assist
