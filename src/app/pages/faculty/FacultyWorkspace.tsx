@@ -108,9 +108,17 @@ export function FacultyWorkspace() {
       fetchAll<HolidayRow>((from, to) =>
         supabase.from('holidays').select('*').order('day').range(from, to),
       ),
-      fetchAll<Profile>((from, to) =>
-        supabase.from('profiles').select('*').eq('role', 'student').range(from, to),
-      ),
+      Promise.all([
+        fetchAll<Profile>((from, to) =>
+          supabase.from('profiles').select('*').eq('role', 'student').range(from, to),
+        ).catch(() => [] as Profile[]),
+        rpc<Profile[]>('faculty_list_course_students', { p_course_id: courseId }).catch(() => [] as Profile[]),
+      ]).then(([instStudents, enrolledStudents]) => {
+        const byId = new Map<string, Profile>();
+        for (const p of instStudents) byId.set(p.id, p);
+        for (const p of enrolledStudents ?? []) byId.set(p.id, p);
+        return Array.from(byId.values());
+      }),
       rpc<AiUsageSummary[]>('ai_usage'),
       fetchAll<QuestionRow>((from, to) =>
         supabase.from('questions').select('*').eq('course_id', courseId).order('created_at').range(from, to),
