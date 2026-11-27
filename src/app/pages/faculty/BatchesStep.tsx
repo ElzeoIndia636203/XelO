@@ -789,7 +789,7 @@ export function BatchesStep({
                           <th>Name</th>
                           <th>Email</th>
                           <th>Status</th>
-                          <th style={{ textAlign: 'right' }}>Actions</th>
+                          {batches.length > 1 ? <th style={{ textAlign: 'right' }}>Batch</th> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -814,42 +814,27 @@ export function BatchesStep({
                                 {m.joined ? 'Joined' : 'Invited'}
                               </Chip>
                             </td>
-                            <td style={{ textAlign: 'right' }}>
-                              <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                                {batches.length > 1 ? (
-                                  <select
-                                    aria-label={`Move ${m.email || m.name} to batch`}
-                                    className="field field-sm"
-                                    disabled={hasConductedSession || busy || !m.email}
-                                    value={b.id}
-                                    onChange={(e) => {
-                                      if (e.target.value !== b.id) {
-                                        void moveStudent(m.email, e.target.value);
-                                      }
-                                    }}
-                                  >
-                                    {batches.map((target) => (
-                                      <option key={target.id} value={target.id}>
-                                        {target.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  className="btn field-sm"
-                                  disabled={hasConductedSession || busy}
-                                  onClick={() =>
-                                    void removeStudentsByKeys(
-                                      [m.key],
-                                      m.email || m.name || 'this student',
-                                    )
-                                  }
+                            {batches.length > 1 ? (
+                              <td style={{ textAlign: 'right' }}>
+                                <select
+                                  aria-label={`Move ${m.email || m.name} to batch`}
+                                  className="field field-sm"
+                                  disabled={hasConductedSession || busy || !m.email}
+                                  value={b.id}
+                                  onChange={(e) => {
+                                    if (e.target.value !== b.id) {
+                                      void moveStudent(m.email, e.target.value);
+                                    }
+                                  }}
                                 >
-                                  Remove
-                                </button>
-                              </div>
-                            </td>
+                                  {batches.map((target) => (
+                                    <option key={target.id} value={target.id}>
+                                      {target.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>
