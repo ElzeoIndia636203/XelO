@@ -339,6 +339,7 @@ export function InstantTestStep({
 
     try {
       let remaining = needTotal;
+      let chunkCalls = 0;
       for (let slot = 1; slot <= questionCount && remaining > 0; slot++) {
         const slotTarget = regenerateBalanceOnly
           ? Math.ceil(remaining / (questionCount - slot + 1))
@@ -347,11 +348,16 @@ export function InstantTestStep({
         let slotBuilt = 0;
 
         while (slotBuilt < slotTarget && remaining > 0) {
+          if (chunkCalls > 0) {
+            await new Promise((r) => setTimeout(r, 1200));
+          }
+          chunkCalls += 1;
           const chunk = Math.min(5, slotTarget - slotBuilt, remaining);
           setGenProgress(
             `Generating AI questions for Q${slot} (${allBuilt.length}/${bucketTarget} in bucket)…`,
           );
-          const res = await fn<{
+
+          let res: {
             questions: Array<{
               title: string;
               statement: string;
@@ -364,18 +370,48 @@ export function InstantTestStep({
               visible_tests: InstantTestCase[];
               hidden_tests: InstantTestCase[];
             }>;
-          }>('ai-generate', {
-            kind: 'instant_test_bucket',
-            course_id: course.id,
-            topic: topic.trim(),
-            slot,
-            bucket_size: chunk,
-            difficulty: slotDiff,
-            co_code: selectedCo?.code ?? 'CO1',
-            visible_count: visibleCount,
-            hidden_count: hiddenCount,
-            avoid_titles: avoidTitles,
-          });
+          } | null = null;
+
+          for (let retry = 0; retry < 3; retry++) {
+            try {
+              res = await fn<{
+                questions: Array<{
+                  title: string;
+                  statement: string;
+                  input_spec: string;
+                  output_spec: string;
+                  constraints: string;
+                  sample_input: string;
+                  sample_output: string;
+                  difficulty: 'easy' | 'medium' | 'hard';
+                  visible_tests: InstantTestCase[];
+                  hidden_tests: InstantTestCase[];
+                }>;
+              }>('ai-generate', {
+                kind: 'instant_test_bucket',
+                course_id: course.id,
+                topic: topic.trim(),
+                slot,
+                bucket_size: chunk,
+                difficulty: slotDiff,
+                co_code: selectedCo?.code ?? 'CO1',
+                visible_count: visibleCount,
+                hidden_count: hiddenCount,
+                avoid_titles: avoidTitles,
+              });
+              break;
+            } catch (callErr) {
+              const msg = callErr instanceof Error ? callErr.message : String(callErr);
+              if (msg.includes('429') && retry < 2) {
+                const waitSec = 6 * (retry + 1);
+                setGenProgress(`AI rate limited — waiting ${waitSec}s before retrying Q${slot} (${allBuilt.length}/${bucketTarget})…`);
+                await new Promise((r) => setTimeout(r, waitSec * 1000));
+                continue;
+              }
+              throw callErr;
+            }
+          }
+          if (!res) break;
 
           const currentSlotCount = allBuilt.filter((q) => q.slot === slot).length;
           for (let vi = 0; vi < res.questions.length; vi++) {
@@ -414,6 +450,11 @@ export function InstantTestStep({
       setActiveVariant(allBuilt.find((q) => q.slot === 1)?.variant ?? 1);
       onNotify(`Bucket updated: ${allBuilt.length}/${bucketTarget} questions (validate & approve to publish).`, true);
     } catch (err) {
+      if (allBuilt.length > existing.length) {
+        setQuestions(allBuilt);
+        setActiveSlot(1);
+        setActiveVariant(allBuilt.find((q) => q.slot === 1)?.variant ?? 1);
+      }
       onNotify(errorMessage(err), false);
     } finally {
       setGenProgress('');

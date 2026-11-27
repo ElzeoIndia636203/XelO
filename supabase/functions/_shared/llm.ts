@@ -6,13 +6,23 @@ export interface LlmCallOptions {
   maxTokens?: number;
 }
 
+function parseRetryAfterMs(res: Response): number | undefined {
+  const raw = res.headers.get('retry-after');
+  if (!raw) return undefined;
+  const secs = Number(raw);
+  if (Number.isFinite(secs) && secs > 0) {
+    return Math.min(20_000, Math.ceil(secs * 1000));
+  }
+  return undefined;
+}
+
 async function callGeminiText(
   apiKey: string,
   model: string,
   system: string,
   user: string,
   maxTokens: number,
-): Promise<{ ok: true; text: string } | { ok: false; status: number }> {
+): Promise<{ ok: true; text: string } | { ok: false; status: number; retryAfterMs?: number }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url, {
     method: 'POST',
@@ -26,7 +36,7 @@ async function callGeminiText(
       },
     }),
   });
-  if (!res.ok) return { ok: false, status: res.status };
+  if (!res.ok) return { ok: false, status: res.status, retryAfterMs: parseRetryAfterMs(res) };
   const body = (await res.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
@@ -43,7 +53,7 @@ async function callAnthropicText(
   system: string,
   user: string,
   maxTokens: number,
-): Promise<{ ok: true; text: string } | { ok: false; status: number }> {
+): Promise<{ ok: true; text: string } | { ok: false; status: number; retryAfterMs?: number }> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -58,7 +68,7 @@ async function callAnthropicText(
       messages: [{ role: 'user', content: user }],
     }),
   });
-  if (!res.ok) return { ok: false, status: res.status };
+  if (!res.ok) return { ok: false, status: res.status, retryAfterMs: parseRetryAfterMs(res) };
   const body = (await res.json()) as {
     content?: Array<{ type: string; text?: string }>;
   };
@@ -89,14 +99,23 @@ export async function callLlmJson<T>(
 
   let lastErr: unknown = new Error('ai_failed');
   let prompt = opts.user;
+  let transientRetries = 0;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; ) {
     const out = useGemini
       ? await callGeminiText(geminiKey!, model, opts.system, prompt, maxTokens)
       : await callAnthropicText(anthropicKey!, model, opts.system, prompt, maxTokens);
 
     if (!out.ok) {
       lastErr = new Error(`ai_http_${out.status}`);
+      const isTransient = out.status === 429 || out.status === 500 || out.status === 502 || out.status === 503 || out.status === 504;
+      if (isTransient && transientRetries < 3) {
+        transientRetries += 1;
+        const delayMs = out.retryAfterMs ?? Math.min(12_000, 2000 * 2 ** (transientRetries - 1));
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      attempt += 1;
       continue;
     }
 
@@ -105,6 +124,7 @@ export async function callLlmJson<T>(
       return validate(parsed);
     } catch (err) {
       lastErr = err;
+      attempt += 1;
       prompt = `${opts.user}\n\nYour previous reply was not valid JSON matching the schema. Return ONLY a single valid JSON object with no markdown prose.`;
     }
   }
