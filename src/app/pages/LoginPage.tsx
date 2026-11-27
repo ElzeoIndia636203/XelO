@@ -10,14 +10,16 @@ import { rpc, supabase } from '../../lib/supabase';
 const POST_LOGIN_FROM_KEY = 'xeio_post_login_from';
 
 export function LoginPage() {
-  const { session, profile, restored, authError, setAuthError } = useSession();
+  const { session, profile, restored, authError, setAuthError, reloadSession } = useSession();
   const location = useLocation();
   const stateFrom = (location.state as { from?: string } | null)?.from ?? null;
 
   const [email, setEmail] = useState('');
-  const [busy, setBusy] = useState<null | 'google' | 'azure' | 'otp'>(null);
+  const [busy, setBusy] = useState<null | 'google' | 'azure' | 'otp' | 'verify'>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [otpSentEmail, setOtpSentEmail] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
 
   if (!restored) {
     return (
@@ -116,7 +118,31 @@ export function LoginPage() {
       if (error) {
         setLocalError(errorMessage(error.message));
       } else {
-        setStatusMsg(`Sign-in link sent to ${validEmail}. Check your inbox.`);
+        setOtpSentEmail(validEmail);
+        setOtpCode('');
+        setStatusMsg(`Sign-in link and code sent to ${validEmail}. Check your inbox.`);
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleVerifyOtp(e: FormEvent) {
+    e.preventDefault();
+    if (!otpSentEmail || !otpCode.trim()) return;
+    setBusy('verify');
+    setLocalError(null);
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.verifyOtp({
+        email: otpSentEmail,
+        token: otpCode.trim(),
+        type: 'email',
+      });
+      if (error) {
+        setLocalError(errorMessage(error.message));
+      } else {
+        await reloadSession();
       }
     } finally {
       setBusy(null);
@@ -285,6 +311,29 @@ export function LoginPage() {
           <div className="banner banner-ok" role="status">
             {statusMsg}
           </div>
+        ) : null}
+
+        {otpSentEmail ? (
+          <form onSubmit={handleVerifyOtp} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              className="field mono"
+              value={otpCode}
+              onChange={(e) => setOtpCode(e.target.value)}
+              placeholder="6-digit code from email"
+              style={{ flex: 1, height: 40 }}
+            />
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={busy !== null || otpCode.trim().length < 6}
+              style={{ height: 40 }}
+            >
+              {busy === 'verify' ? 'Verifying…' : 'Verify code'}
+            </button>
+          </form>
         ) : null}
 
         {activeError ? (

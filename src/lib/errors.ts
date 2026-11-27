@@ -55,6 +55,8 @@ const MESSAGES: Record<string, string> = {
     "This email isn't onboarded yet. Ask your faculty for an invite or your admin for an account.",
   'Email rate limit exceeded': 'Too many sign-in emails sent. Please wait a few minutes and try again.',
   'email rate limit exceeded': 'Too many sign-in emails sent. Please wait a few minutes and try again.',
+  'Token has expired or is invalid': 'That sign-in code or link has expired or is invalid. Request a new one.',
+  otp_expired: 'That sign-in code or link has expired. Request a new one.',
 };
 
 export function errorMessage(err: unknown): string {
