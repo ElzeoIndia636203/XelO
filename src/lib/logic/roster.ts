@@ -135,6 +135,33 @@ export function validateRoster(
   return { valid, errors };
 }
 
+export type BatchOrderMode = 'prn_asc' | 'random' | 'upload';
+
+function prnLast4Value(rollNo: string): number {
+  const digits = rollNo.trim().match(/(\d{1,4})\s*$/);
+  if (digits) return Number(digits[1]);
+  return Number.MAX_SAFE_INTEGER;
+}
+
+export function orderRosterRows(rows: readonly RosterRow[], mode: BatchOrderMode): RosterRow[] {
+  const copy = [...rows];
+  if (mode === 'upload') return copy;
+  if (mode === 'prn_asc') {
+    return copy.sort((a, b) => {
+      const diff = prnLast4Value(a.roll_no) - prnLast4Value(b.roll_no);
+      if (diff !== 0) return diff;
+      return a.roll_no.localeCompare(b.roll_no);
+    });
+  }
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = copy[i]!;
+    copy[i] = copy[j]!;
+    copy[j] = tmp;
+  }
+  return copy;
+}
+
 export function splitRosterEvenly<T>(rows: readonly T[], maxPerBatch = 65): T[][] {
   if (rows.length === 0) return [];
   const cap = Math.max(1, maxPerBatch);

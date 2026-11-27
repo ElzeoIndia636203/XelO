@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { Banner, Card, Chip, Empty } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import {
+  orderRosterRows,
   parseRosterCsv,
   parseRosterGrid,
   splitRosterEvenly,
   validateRoster,
+  type BatchOrderMode,
   type RosterRow,
 } from '../../../lib/logic/roster';
 import { buildRosterTemplateXlsx } from '../../../lib/logic/xlsxExport';
@@ -35,6 +37,8 @@ export function BatchesStep({
 }) {
   const [csvText, setCsvText] = useState('');
   const [allowPersonalEmails, setAllowPersonalEmails] = useState(false);
+  const [batchOrder, setBatchOrder] = useState<BatchOrderMode>('prn_asc');
+  const [maxPerBatch, setMaxPerBatch] = useState(65);
   const [parsedRows, setParsedRows] = useState<RosterRow[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [manualRoll, setManualRoll] = useState('');
@@ -54,9 +58,13 @@ export function BatchesStep({
   const joinedCount = enrollments.length;
   const pendingCount = pendingEnrollments.length;
 
-  function processRows(raw: RosterRow[], allowPersonal = allowPersonalEmails) {
+  function processRows(
+    raw: RosterRow[],
+    allowPersonal = allowPersonalEmails,
+    orderMode = batchOrder,
+  ) {
     const { valid, errors } = validateRoster(raw, institutionDomain, allowPersonal);
-    setParsedRows(valid);
+    setParsedRows(orderRosterRows(valid, orderMode));
     setParseErrors(errors);
   }
 
@@ -107,10 +115,11 @@ export function BatchesStep({
         p_course_id: course.id,
         p_rows: parsedRows,
         p_allow_personal: allowPersonalEmails,
+        p_max_per_batch: effectiveMaxPerBatch,
       });
 
       const batchCodeMap = new Map(created.map((b) => [b.batch_name, b.class_code]));
-      const split = splitRosterEvenly(parsedRows, 65);
+      const split = splitRosterEvenly(parsedRows, effectiveMaxPerBatch);
       const invitesPayload = split.flatMap((chunk, idx) => {
         const code = batchCodeMap.get(`Batch ${String.fromCharCode(65 + idx)}`) ?? created[0]?.class_code;
         return chunk.map((s) => ({
@@ -344,7 +353,8 @@ export function BatchesStep({
     }
   }
 
-  const previewSplit = splitRosterEvenly(parsedRows, 65);
+  const effectiveMaxPerBatch = Math.min(65, Math.max(1, Number.isFinite(maxPerBatch) ? maxPerBatch : 65));
+  const previewSplit = splitRosterEvenly(parsedRows, effectiveMaxPerBatch);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -467,6 +477,44 @@ export function BatchesStep({
                 }}
               />
               Allow personal student emails (<code>gmail.com</code>, <code>outlook.com</code> only)
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+            <label className="field-label">
+              Batch creation order
+              <select
+                className="field field-sm"
+                disabled={hasConductedSession}
+                value={batchOrder}
+                onChange={(e) => {
+                  const next = e.target.value as BatchOrderMode;
+                  setBatchOrder(next);
+                  if (parsedRows.length > 0) {
+                    setParsedRows((prev) => orderRosterRows(prev, next));
+                  }
+                }}
+              >
+                <option value="prn_asc">PRN ascending (last 4 digits)</option>
+                <option value="random">Randomly</option>
+                <option value="upload">Keep upload order</option>
+              </select>
+            </label>
+            <label className="field-label">
+              Students per batch (max 65)
+              <input
+                type="number"
+                className="field field-sm mono"
+                min={1}
+                max={65}
+                disabled={hasConductedSession}
+                value={maxPerBatch}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setMaxPerBatch(Number.isFinite(v) ? Math.min(65, Math.max(1, Math.trunc(v))) : 65);
+                }}
+                style={{ width: 120 }}
+              />
             </label>
           </div>
 
