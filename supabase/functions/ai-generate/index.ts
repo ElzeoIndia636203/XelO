@@ -157,6 +157,7 @@ Deno.serve(async (req: Request) => {
     if (parsed.data.kind === 'outcomes') {
       const draft = await callLlmJson(
         {
+          task: 'academic',
           system:
             'You are XeIO Assist, an NBA/NAAC outcome-based education expert. Return ONLY valid JSON with shape {"outcomes":[{"code":"CO1","statement":"...","btl":3,"unit":1}],"map":[{"co":"CO1","po":"PO1","level":3}]}. Rules: (1) Carefully analyze each CO statement, its Bloom level (BTL 1..6), and the exact PO/PSO definitions provided. (2) Map ONLY to the PO/PSO codes provided (or PO1..PO11, PSO1..PSO2 if none listed). (3) Evaluate EVERY PO and EVERY PSO (including PSO1, PSO2, etc.) for each CO: assign strength 1 (low), 2 (moderate), 3 (high), or omit/0 only if genuinely unrelated. Core technical/programming COs should map to relevant PSOs as well as PO1/PO2/PO3/PO5. Do NOT map non-technical POs (ethics, environment, society, communication, project management) unless the CO explicitly covers them. (4) Recheck the entire matrix before finalizing: COs with similar technical scope and the same BTL level must have consistent, balanced mapping strengths.',
           user: `Course: ${course.code} ${course.title}\n\n${parsed.data.syllabus}`,
@@ -179,6 +180,7 @@ Deno.serve(async (req: Request) => {
     if (parsed.data.kind === 'class_task') {
       const draft = await callLlmJson(
         {
+          task: 'classroom',
           system:
             'You are XeIO Assist. Return ONLY valid JSON {"title":"...","body":"...","payload":{"code":"...","options":["..."]},"answer_key":{"expected":"...","accept":["..."]}}. Draft one concise in-class task matching the requested type (quiz needs 4 options & 0-based index string expected; poll needs 3-4 options; fill/predict/debug include C code snippet & expected answer; assignment states input/output specs).',
           user: `Course: ${course.code} ${course.title}\nWeek: ${parsed.data.week}\nTask type: ${parsed.data.task_type}\nTopic: ${parsed.data.topic}`,
@@ -201,6 +203,7 @@ Deno.serve(async (req: Request) => {
     if (parsed.data.kind === 'announcement') {
       const draft = await callLlmJson(
         {
+          task: 'classroom',
           system:
             'You are XeIO Assist. Return ONLY valid JSON {"title":"...","body":"..."} with a short, plain classroom announcement for university programming lab students.',
           user: `Course: ${course.code} ${course.title}\nTopic: ${parsed.data.topic}\nContext: ${parsed.data.context ?? ''}`,
@@ -223,6 +226,7 @@ Deno.serve(async (req: Request) => {
     if (parsed.data.kind === 'report_narrative') {
       const draft = await callLlmJson(
         {
+          task: 'academic',
           system:
             'You are XeIO Assist. Return ONLY valid JSON {"internal_summary":"...","overall_summary":"...","bos_suggestions":"..."}. Base every percentage or count strictly on the supplied metrics.',
           user: `Course: ${course.code} ${course.title}\nComputed metrics JSON:\n${JSON.stringify(parsed.data.metrics)}`,
@@ -245,6 +249,7 @@ Deno.serve(async (req: Request) => {
     if (parsed.data.kind === 'feedback_loop') {
       const questions = await callLlmJson(
         {
+          task: 'classroom',
           system:
             'You are XeIO Assist. Return ONLY valid JSON {"questions":[{"id":"q_1","category":"engagement","prompt":"..."}]}. Draft exactly 15 concise 5-to-1 rating-scale statements (5=Excellent/Strongly Agree, 1=Needs Improvement/Strongly Disagree): first 5 with category="engagement" (classroom/lab engagement & participation), next 5 with category="support" (faculty support, resource sharing, and doubt clarification), and final 5 with category="co_specific" tailored to the specific Course Outcome.',
           user: `Course: ${course.code} ${course.title}\nCourse Outcome: ${parsed.data.co_code} — ${parsed.data.co_statement ?? ''}`,
@@ -276,6 +281,7 @@ Deno.serve(async (req: Request) => {
       ).slice(0, 6);
       const questions = await callLlmJson(
         {
+          task: 'coding',
           system: `You are XeIO Assist. Return ONLY valid JSON {"questions":[...]}. Generate exactly ${bucketSize} distinct, well-defined programming problems for Question Slot ${parsed.data.slot}. Each problem MUST include: title, statement (clear problem definition), input_spec, output_spec, constraints, sample_input, sample_output, difficulty ("easy"|"medium"|"hard"), visible_tests (exact array of ${parsed.data.visible_count} {"input":"...","expected":"..."}), hidden_tests (exact array of ${parsed.data.hidden_count} {"input":"...","expected":"..."}), and references (object mapping each requested language code [${targetLangs.join(', ')}] to a complete working stdin/stdout reference solution that passes all visible and hidden tests). All test cases must use exact stdin/stdout.`,
           user: `Course: ${course.code} ${course.title}\nTopic: ${parsed.data.topic}\nDifficulty: ${parsed.data.difficulty}\nCO: ${parsed.data.co_code ?? 'CO1'}\nSlot: ${parsed.data.slot}\nLanguages: ${targetLangs.join(', ')}\nAvoid titles: ${avoid}`,
           maxTokens: 8192,
@@ -316,6 +322,7 @@ Deno.serve(async (req: Request) => {
 
       const review = await callLlmJson(
         {
+          task: 'academic',
           system:
             'You are XeIO Assist reviewing a programming lab course plan for an HOD (NBA/NAAC compliance). Return ONLY valid JSON {"verdict":"approve"|"revise","summary":"...","strengths":["..."],"gaps":["..."],"suggested_remark":"..."}. Be concise and specific: check CO clarity & Bloom level (BTL) progression, CO-PO/PSO mapping coverage, and the 50-mark rubric.',
           user: `Course: ${course.code} ${course.title}\nAllowed languages: ${JSON.stringify(course.allowed_langs)}\nRubric: ${JSON.stringify((course as { rubric?: unknown }).rubric)}\nOutcomes: ${JSON.stringify(outcomes ?? [])}\nCO-PO Map: ${JSON.stringify(coPoMap ?? [])}`,
@@ -361,6 +368,7 @@ Deno.serve(async (req: Request) => {
 
       const candidates = await callLlmJson(
         {
+          task: 'coding',
           system:
             'You are XeIO Assist. Return ONLY valid JSON {"candidates":[...]}. Generate exactly 4 distinct programming lab questions (easy, medium, hard, medium). Each candidate has: title, statement, input_spec, output_spec, constraints, difficulty, co_code, visible_tests (exact array of 2 {input, expected}), hidden_tests (exact array of 3 {input, expected}), and references (object mapping enabled language codes to working stdin/stdout solution).',
           user: `Course: ${course.code} ${course.title}\nSession S${session.n}: ${session.topic}\nCO: ${coRow?.code ?? 'CO1'} (${coRow?.statement ?? ''}), BTL L${session.btl}\nEnabled languages: ${allowedLangs.join(', ')}\nAvoid these existing titles: ${existingTitles.slice(0, 40).join(' | ')}`,
@@ -494,6 +502,7 @@ Deno.serve(async (req: Request) => {
 
       const raw = await callLlmJson(
         {
+          task: 'coding',
           system:
             'Generate 40 distinct programming exam questions as JSON {"candidates": [...]}. Each candidate has co_code, difficulty, title, statement, input_spec, output_spec, constraints, visible_tests (2), hidden_tests (3), references (map of lang->code), starter_code (map of lang->code). Do NOT reuse any title in exclude_titles.',
           user: JSON.stringify({
@@ -638,6 +647,7 @@ Deno.serve(async (req: Request) => {
     // kind === 'bank'
     const bankPair = await callLlmJson(
       {
+        task: 'bank',
         system:
           'You are XeIO Assist. Return ONLY valid JSON {"pre":[...],"post":[...]}. Both arrays must contain 45 distinct MCQs: 15 easy, 15 medium, 15 hard. Zero overlap or paraphrased duplicates between pre and post. Each item: {"level":"easy|medium|hard","stem":"...","options":["A","B","C","D"],"answer":0}.',
         user: `Course: ${course.code} ${course.title}\nSession S${session.n}: ${session.topic}\nCO: ${coRow?.code ?? 'CO1'}, BTL L${session.btl}\nPre-test checks conceptual readiness before lab; post-test checks code behaviour, edge cases, and complexity after solving the lab.`,

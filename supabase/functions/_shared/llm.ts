@@ -1,9 +1,20 @@
 import { extractJsonObject } from './ai-schema.ts';
 
+export type LlmTaskGroup = 'coding' | 'bank' | 'academic' | 'classroom';
+
 export interface LlmCallOptions {
   system: string;
   user: string;
   maxTokens?: number;
+  task?: LlmTaskGroup;
+}
+
+type ProviderKind = 'gemini' | 'nvidia' | 'anthropic';
+
+function detectProvider(apiKey: string): ProviderKind {
+  if (apiKey.startsWith('nvapi-')) return 'nvidia';
+  if (apiKey.startsWith('sk-ant-')) return 'anthropic';
+  return 'gemini';
 }
 
 function parseRetryAfterMs(res: Response): number | undefined {
@@ -80,78 +91,125 @@ async function callAnthropicText(
   return { ok: true, text };
 }
 
+async function callNvidiaText(
+  apiKey: string,
+  model: string,
+  system: string,
+  user: string,
+  maxTokens: number,
+): Promise<{ ok: true; text: string } | { ok: false; status: number; retryAfterMs?: number }> {
+  try {
+    const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!res.ok) return { ok: false, status: res.status, retryAfterMs: parseRetryAfterMs(res) };
+    const body = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const text = body.choices?.[0]?.message?.content ?? '';
+    return { ok: true, text };
+  } catch {
+    return { ok: false, status: 504 };
+  }
+}
+
+function resolveKeyChain(task?: LlmTaskGroup): string[] {
+  const upper = task ? task.toUpperCase() : null;
+  const candidates = [
+    upper ? Deno.env.get(`AI_KEY_${upper}`)?.trim() : undefined,
+    upper ? Deno.env.get(`AI_KEY_${upper}_BACKUP`)?.trim() : undefined,
+    Deno.env.get('NVIDIA_API_KEY')?.trim(),
+    Deno.env.get('NVIDIA_API_KEY_BACKUP')?.trim(),
+    Deno.env.get('GEMINI_API_KEY_PRIMARY')?.trim(),
+    Deno.env.get('GEMINI_API_KEY')?.trim(),
+    Deno.env.get('GEMINI_API_KEY_BACKUP')?.trim(),
+    Deno.env.get('ANTHROPIC_API_KEY')?.trim(),
+  ];
+  return candidates.filter(
+    (k, idx, arr): k is string => Boolean(k) && arr.indexOf(k) === idx,
+  );
+}
+
+function resolveModelsForProvider(provider: ProviderKind, task?: LlmTaskGroup): string[] {
+  const upper = task ? task.toUpperCase() : null;
+  const taskOverride = upper ? Deno.env.get(`AI_MODEL_${upper}`)?.trim() : undefined;
+  const globalOverride = Deno.env.get('AI_MODEL')?.trim();
+
+  if (provider === 'nvidia') {
+    const base =
+      task === 'coding'
+        ? ['z-ai/glm-5.3-flash', 'moonshotai/kimi-k3.1-pro', 'nvidia/nemotron-3-ultra-550b-a55b', 'google/gemma-4-31b-it']
+        : task === 'bank'
+          ? ['z-ai/glm-5.3-flash', 'minimaxai/minimax-m2.7', 'google/gemma-4-31b-it']
+          : task === 'academic'
+            ? ['mistralai/mistral-large-4', 'google/gemma-4-31b-it', 'z-ai/glm-5.3-flash']
+            : ['google/gemma-4-31b-it', 'z-ai/glm-5.3-flash'];
+    return [taskOverride, globalOverride, ...base].filter(
+      (m, idx, arr): m is string => Boolean(m) && arr.indexOf(m) === idx,
+    );
+  }
+
+  if (provider === 'anthropic') {
+    return [taskOverride ?? globalOverride ?? 'claude-sonnet-4-20250514'];
+  }
+
+  return [taskOverride, globalOverride, 'gemini-3.8-flash', 'gemini-2.5-flash'].filter(
+    (m, idx, arr): m is string => Boolean(m) && arr.indexOf(m) === idx,
+  );
+}
+
 export async function callLlmJson<T>(
   opts: LlmCallOptions,
   validate: (parsed: unknown) => T,
   maxAttempts = 2,
 ): Promise<T> {
-  const primaryGemini = Deno.env.get('GEMINI_API_KEY_PRIMARY')?.trim();
-  const defaultGemini = Deno.env.get('GEMINI_API_KEY')?.trim();
-  const explicitBackup = Deno.env.get('GEMINI_API_KEY_BACKUP')?.trim();
-  const geminiKeys = [primaryGemini, defaultGemini, explicitBackup].filter(
-    (k, idx, arr): k is string => Boolean(k) && arr.indexOf(k) === idx,
-  );
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')?.trim();
-  if (geminiKeys.length === 0 && !anthropicKey) {
+  const keyChain = resolveKeyChain(opts.task);
+  if (keyChain.length === 0) {
     throw new Error('ai_not_configured');
   }
-
-  const useGemini = geminiKeys.length > 0;
-  const configuredModel = Deno.env.get('AI_MODEL')?.trim();
-  const geminiModels = configuredModel
-    ? [configuredModel]
-    : ['gemini-3.8-flash', 'gemini-2.5-flash'];
-  const anthropicModel = configuredModel ?? 'claude-sonnet-4-20250514';
-  const maxTokens = opts.maxTokens ?? (useGemini ? 4096 : 2048);
 
   let lastErr: unknown = new Error('ai_failed');
   let prompt = opts.user;
 
-  if (!useGemini) {
-    let transientRetries = 0;
-    for (let attempt = 1; attempt <= maxAttempts; ) {
-      const out = await callAnthropicText(anthropicKey!, anthropicModel, opts.system, prompt, maxTokens);
-      if (!out.ok) {
-        lastErr = new Error(`ai_http_${out.status}`);
-        const isTransient = out.status === 429 || out.status === 500 || out.status === 502 || out.status === 503 || out.status === 504;
-        if (isTransient && transientRetries < 3) {
-          transientRetries += 1;
-          const delayMs = out.retryAfterMs ?? Math.min(12_000, 2000 * 2 ** (transientRetries - 1));
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-          continue;
-        }
-        attempt += 1;
-        continue;
-      }
-      try {
-        const parsed = extractJsonObject(out.text);
-        return validate(parsed);
-      } catch (err) {
-        lastErr = err;
-        attempt += 1;
-        prompt = `${opts.user}\n\nYour previous reply was not valid JSON matching the schema. Return ONLY a single valid JSON object with no markdown prose.`;
-      }
-    }
-    throw lastErr instanceof Error ? lastErr : new Error('ai_invalid_output');
-  }
-
-  for (let keyIdx = 0; keyIdx < geminiKeys.length; keyIdx++) {
-    const apiKey = geminiKeys.at(keyIdx)!;
-    const hasBackup = keyIdx < geminiKeys.length - 1;
+  for (let keyIdx = 0; keyIdx < keyChain.length; keyIdx++) {
+    const apiKey = keyChain.at(keyIdx)!;
+    const provider = detectProvider(apiKey);
+    const models = resolveModelsForProvider(provider, opts.task);
+    const maxTokens = opts.maxTokens ?? (provider === 'anthropic' ? 2048 : 4096);
+    const hasBackup = keyIdx < keyChain.length - 1;
     let modelIdx = 0;
     let transientRetries = 0;
 
     for (let attempt = 1; attempt <= maxAttempts; ) {
-      const model = geminiModels.at(modelIdx)!;
-      const out = await callGeminiText(apiKey, model, opts.system, prompt, maxTokens);
+      const model = models.at(modelIdx)!;
+      const out =
+        provider === 'nvidia'
+          ? await callNvidiaText(apiKey, model, opts.system, prompt, maxTokens)
+          : provider === 'anthropic'
+            ? await callAnthropicText(apiKey, model, opts.system, prompt, maxTokens)
+            : await callGeminiText(apiKey, model, opts.system, prompt, maxTokens);
 
       if (!out.ok) {
         lastErr = new Error(`ai_http_${out.status}`);
-        if (out.status === 404 && modelIdx < geminiModels.length - 1) {
+        if ((out.status === 404 || out.status === 400) && modelIdx < models.length - 1) {
           modelIdx += 1;
           continue;
         }
-        // Fail over immediately to backup key on quota/auth errors when a backup key exists
         if ((out.status === 429 || out.status === 403 || out.status === 401) && hasBackup) {
           break;
         }
