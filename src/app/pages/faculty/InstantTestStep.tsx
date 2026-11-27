@@ -173,6 +173,7 @@ export function InstantTestStep({
   const [posttestMarks, setPosttestMarks] = useState(0);
   const [vivaMarks, setVivaMarks] = useState(0);
   const [slotDifficulties, setSlotDifficulties] = useState<Array<'easy' | 'medium' | 'hard' | 'mixed'>>(['medium', 'medium']);
+  const [slotCoIds, setSlotCoIds] = useState<string[]>([outcomes[0]?.id ?? '', outcomes[0]?.id ?? '']);
   const [markMatrixApproved, setMarkMatrixApproved] = useState(false);
 
   const [scopeType, setScopeType] = useState<'class' | 'batch' | 'students'>('class');
@@ -214,6 +215,10 @@ export function InstantTestStep({
   const [reportTest, setReportTest] = useState<InstantTestRow | null>(null);
 
   const selectedCo = outcomes.find((o) => o.id === coId) ?? outcomes[0] ?? null;
+  const getSlotCo = (slot: number) => {
+    const id = questionCount > 1 ? (slotCoIds[slot - 1] ?? coId) : coId;
+    return outcomes.find((o) => o.id === id) ?? selectedCo;
+  };
   const studentMap = new Map(studentProfiles.map((p) => [p.id, p]));
   const targetStrength =
     scopeType === 'class'
@@ -394,7 +399,7 @@ export function InstantTestStep({
                 slot,
                 bucket_size: chunk,
                 difficulty: slotDiff,
-                co_code: selectedCo?.code ?? 'CO1',
+                co_code: getSlotCo(slot)?.code ?? 'CO1',
                 visible_count: visibleCount,
                 hidden_count: hiddenCount,
                 avoid_titles: avoidTitles,
@@ -431,7 +436,7 @@ export function InstantTestStep({
               sample_output: item.sample_output,
               difficulty: item.difficulty,
               marks: perQMarks,
-              co_code: selectedCo?.code ?? 'CO1',
+              co_code: getSlotCo(slot)?.code ?? 'CO1',
               visible_marks: visibleMarks,
               hidden_marks: hiddenMarks,
               visible_tests: item.visible_tests,
@@ -480,7 +485,7 @@ export function InstantTestStep({
       sample_output: '',
       difficulty: diff === 'mixed' ? 'medium' : diff,
       marks: perQMarks,
-      co_code: selectedCo?.code ?? 'CO1',
+      co_code: getSlotCo(activeSlot)?.code ?? 'CO1',
       visible_marks: visibleMarks,
       hidden_marks: hiddenMarks,
       visible_tests: Array.from({ length: visibleCount }, () => ({ input: '', expected: '' })),
@@ -1148,70 +1153,97 @@ export function InstantTestStep({
               />
             </label>
             {questionCount === 1 ? (
-              <label className="field-label">
-                Coding difficulty
-                <select
-                  className="field"
-                  value={difficulty}
-                  onChange={(e) => {
-                    const val = e.target.value as 'easy' | 'medium' | 'hard' | 'mixed';
-                    setDifficulty(val);
-                    setSlotDifficulties((prev) => {
-                      const next = [...prev];
-                      next[0] = val;
-                      return next;
-                    });
-                    setMarkMatrixApproved(false);
-                  }}
-                >
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                  <option value="hard">Hard</option>
-                  <option value="mixed">Mixed</option>
-                </select>
-              </label>
+              <>
+                <label className="field-label">
+                  Coding difficulty
+                  <select
+                    className="field"
+                    value={difficulty}
+                    onChange={(e) => {
+                      const val = e.target.value as 'easy' | 'medium' | 'hard' | 'mixed';
+                      setDifficulty(val);
+                      setSlotDifficulties((prev) => {
+                        const next = [...prev];
+                        next[0] = val;
+                        return next;
+                      });
+                      setMarkMatrixApproved(false);
+                    }}
+                  >
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                    <option value="mixed">Mixed</option>
+                  </select>
+                </label>
+                <label className="field-label">
+                  Mapped CO
+                  <select className="field" value={selectedCo?.id ?? ''} onChange={(e) => setCoId(e.target.value)}>
+                    {outcomes.length === 0 ? <option value="">None</option> : null}
+                    {outcomes.map((co) => (
+                      <option key={co.id} value={co.id}>
+                        {co.code} (L{co.btl})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
             ) : null}
-            <label className="field-label">
-              Mapped CO
-              <select className="field" value={selectedCo?.id ?? ''} onChange={(e) => setCoId(e.target.value)}>
-                {outcomes.length === 0 ? <option value="">None</option> : null}
-                {outcomes.map((co) => (
-                  <option key={co.id} value={co.id}>
-                    {co.code} (L{co.btl})
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
 
           {questionCount > 1 ? (
             <div style={{ padding: 10, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-                Individual question difficulty ({questionCount} questions)
+                Individual question difficulty & CO mapping ({questionCount} questions)
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
                 {Array.from({ length: questionCount }, (_, idx) => (
-                  <label key={idx} className="field-label">
-                    Q{idx + 1} difficulty
-                    <select
-                      className="field field-sm"
-                      value={slotDifficulties[idx] ?? difficulty}
-                      onChange={(e) => {
-                        const val = e.target.value as 'easy' | 'medium' | 'hard' | 'mixed';
-                        setSlotDifficulties((prev) => {
-                          const next = Array.from({ length: questionCount }, (_, i) => prev[i] ?? difficulty);
-                          next[idx] = val;
-                          return next;
-                        });
-                        setMarkMatrixApproved(false);
-                      }}
-                    >
-                      <option value="easy">Easy</option>
-                      <option value="medium">Medium</option>
-                      <option value="hard">Hard</option>
-                      <option value="mixed">Mixed</option>
-                    </select>
-                  </label>
+                  <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                    <label className="field-label">
+                      Q{idx + 1} difficulty
+                      <select
+                        className="field field-sm"
+                        value={slotDifficulties[idx] ?? difficulty}
+                        onChange={(e) => {
+                          const val = e.target.value as 'easy' | 'medium' | 'hard' | 'mixed';
+                          setSlotDifficulties((prev) => {
+                            const next = Array.from({ length: questionCount }, (_, i) => prev[i] ?? difficulty);
+                            next[idx] = val;
+                            return next;
+                          });
+                          setMarkMatrixApproved(false);
+                        }}
+                      >
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
+                        <option value="mixed">Mixed</option>
+                      </select>
+                    </label>
+                    <label className="field-label">
+                      Q{idx + 1} CO
+                      <select
+                        className="field field-sm"
+                        value={getSlotCo(idx + 1)?.id ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSlotCoIds((prev) => {
+                            const next = Array.from({ length: questionCount }, (_, i) => prev[i] ?? (selectedCo?.id ?? ''));
+                            next[idx] = val;
+                            return next;
+                          });
+                          setMarkMatrixApproved(false);
+                        }}
+                      >
+                        {outcomes.length === 0 ? <option value="">None</option> : null}
+                        {outcomes.map((co) => (
+                          <option key={co.id} value={co.id}>
+                            {co.code} (L{co.btl})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1420,7 +1452,7 @@ export function InstantTestStep({
                       <tr key={idx}>
                         <td>Coding Q{idx + 1}</td>
                         <td>
-                          {slotDifficulties[idx] ?? difficulty} · {visibleCount} visible ({visibleMarks}m) + {hiddenCount} hidden ({hiddenMarks}m)
+                          {getSlotCo(idx + 1)?.code ?? 'CO1'} · {slotDifficulties[idx] ?? difficulty} · {visibleCount} visible ({visibleMarks}m) + {hiddenCount} hidden ({hiddenMarks}m)
                         </td>
                         <td className="mono">{visibleMarks + hiddenMarks}</td>
                       </tr>
