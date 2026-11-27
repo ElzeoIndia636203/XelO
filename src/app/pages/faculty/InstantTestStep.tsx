@@ -516,49 +516,178 @@ export function InstantTestStep({
     setActiveVariant(nextVar);
   }
 
+  function parseCsvRows(text: string): string[][] {
+    const rows: string[][] = [];
+    let row: string[] = [];
+    let cell = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i]!;
+      if (inQuotes) {
+        if (ch === '"' && text[i + 1] === '"') {
+          cell += '"';
+          i += 1;
+        } else if (ch === '"') {
+          inQuotes = false;
+        } else {
+          cell += ch;
+        }
+      } else if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        row.push(cell);
+        cell = '';
+      } else if (ch === '\r' || ch === '\n') {
+        if (ch === '\r' && text[i + 1] === '\n') i += 1;
+        row.push(cell);
+        if (row.some((c) => c.trim() !== '')) rows.push(row);
+        row = [];
+        cell = '';
+      } else {
+        cell += ch;
+      }
+    }
+    row.push(cell);
+    if (row.some((c) => c.trim() !== '')) rows.push(row);
+    return rows;
+  }
+
+  function downloadExcelTemplate() {
+    const primaryLang = langs[0] ?? 'c';
+    const headers = [
+      'slot',
+      'title',
+      'statement',
+      'difficulty',
+      'co_code',
+      'visible_input_1',
+      'visible_expected_1',
+      'hidden_input_1',
+      'hidden_expected_1',
+      `code_${primaryLang}`,
+    ];
+    const sample = [
+      '1',
+      'Sum of Two Numbers',
+      'Given two integers A and B, print their sum.',
+      'easy',
+      getSlotCo(1)?.code ?? 'CO1',
+      '3 5',
+      '8',
+      '10 25',
+      '35',
+      primaryLang === 'python'
+        ? 'a, b = map(int, input().split())\nprint(a + b)'
+        : '#include <stdio.h>\nint main(){int a,b;if(scanf("%d %d",&a,&b)==2)printf("%d",a+b);return 0;}',
+    ];
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const csv = `${headers.map(esc).join(',')}\n${sample.map(esc).join(',')}\n`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'instant_questions_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function handleUploadQuestions(file: File | null) {
     if (!file) return;
     try {
-      const text = await file.text();
       const perQMarks = Number((visibleMarks + hiddenMarks).toFixed(2));
-      const parsed = JSON.parse(text) as Array<Partial<InstantQuestionDraft>>;
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        onNotify('Upload a JSON array of questions.', false);
+      const lowerName = file.name.toLowerCase();
+      let rawRows: Array<Array<unknown>> = [];
+
+      if (lowerName.endsWith('.csv')) {
+        rawRows = parseCsvRows(await file.text());
+      } else {
+        const { readSheet } = await import('read-excel-file/browser');
+        rawRows = await readSheet(file);
+      }
+
+      if (rawRows.length < 2) {
+        onNotify('Excel/CSV must have a header row and at least 1 question row.', false);
         return;
       }
-      const built: InstantQuestionDraft[] = parsed.map((item, idx) => {
-        const slot = item.slot && item.slot >= 1 && item.slot <= questionCount ? item.slot : (idx % questionCount) + 1;
+
+      const headers = rawRows[0]!.map((h) => String(h ?? '').trim().toLowerCase().replace(/\s+/g, '_'));
+      const dataRows = rawRows.slice(1).filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
+      if (dataRows.length === 0) {
+        onNotify('No question rows found in the uploaded file.', false);
+        return;
+      }
+
+      const getVal = (row: Array<unknown>, ...keys: string[]) => {
+        for (const k of keys) {
+          const idx = headers.indexOf(k);
+          if (idx >= 0) {
+            const v = String(row.at(idx) ?? '').trim();
+            if (v !== '') return v;
+          }
+        }
+        return '';
+      };
+
+      const built: InstantQuestionDraft[] = dataRows.map((row, idx) => {
+        const slotRaw = Number(getVal(row, 'slot', 'q_no', 'question_no'));
+        const slot = Number.isInteger(slotRaw) && slotRaw >= 1 && slotRaw <= questionCount
+          ? slotRaw
+          : (idx % questionCount) + 1;
         const vNum = questions.filter((q) => q.slot === slot).length + idx + 1;
+
+        const visible: InstantTestCase[] = [];
+        for (let t = 1; t <= 10; t++) {
+          const inp = getVal(row, `visible_input_${t}`, ...(t === 1 ? ['visible_input'] : []));
+          const exp = getVal(row, `visible_expected_${t}`, `visible_output_${t}`, ...(t === 1 ? ['visible_expected', 'visible_output'] : []));
+          if (inp || exp) visible.push({ input: inp, expected: exp });
+        }
+        const hidden: InstantTestCase[] = [];
+        for (let t = 1; t <= 10; t++) {
+          const inp = getVal(row, `hidden_input_${t}`, ...(t === 1 ? ['hidden_input'] : []));
+          const exp = getVal(row, `hidden_expected_${t}`, `hidden_output_${t}`, ...(t === 1 ? ['hidden_expected', 'hidden_output'] : []));
+          if (inp || exp) hidden.push({ input: inp, expected: exp });
+        }
+
+        const references: Record<string, string> = {};
+        const genericCode = getVal(row, 'code', 'reference_code', 'solution');
+        for (const l of langs) {
+          const langCode = getVal(row, `code_${l}`, `reference_${l}`, l);
+          if (langCode) references[l] = langCode;
+          else if (genericCode && l === (langs[0] ?? 'c')) references[l] = genericCode;
+        }
+
+        const rawDiff = getVal(row, 'difficulty').toLowerCase();
+        const diff: 'easy' | 'medium' | 'hard' =
+          rawDiff === 'easy' || rawDiff === 'hard' ? rawDiff : 'medium';
+
         return {
-          id: `up_${slot}_${vNum}_${Date.now()}`,
+          id: `up_${slot}_${vNum}_${Date.now()}_${idx}`,
           slot,
           variant: vNum,
-          title: String(item.title ?? `Uploaded Q${idx + 1}`),
-          statement: String(item.statement ?? ''),
-          input_spec: String(item.input_spec ?? ''),
-          output_spec: String(item.output_spec ?? ''),
-          constraints: String(item.constraints ?? ''),
-          sample_input: String(item.sample_input ?? ''),
-          sample_output: String(item.sample_output ?? ''),
-          difficulty: item.difficulty === 'easy' || item.difficulty === 'hard' ? item.difficulty : 'medium',
+          title: getVal(row, 'title', 'question_title') || `Uploaded Q${idx + 1}`,
+          statement: getVal(row, 'statement', 'problem_statement', 'description'),
+          input_spec: getVal(row, 'input_spec'),
+          output_spec: getVal(row, 'output_spec'),
+          constraints: getVal(row, 'constraints'),
+          sample_input: visible[0]?.input ?? getVal(row, 'sample_input'),
+          sample_output: visible[0]?.expected ?? getVal(row, 'sample_output'),
+          difficulty: diff,
           marks: perQMarks,
-          co_code: selectedCo?.code ?? 'CO1',
+          co_code: getVal(row, 'co_code', 'co') || (getSlotCo(slot)?.code ?? 'CO1'),
           visible_marks: visibleMarks,
           hidden_marks: hiddenMarks,
-          visible_tests: Array.isArray(item.visible_tests) && item.visible_tests.length >= 1
-            ? item.visible_tests
-            : [{ input: '1', expected: '1' }],
-          hidden_tests: Array.isArray(item.hidden_tests) && item.hidden_tests.length >= 1
-            ? item.hidden_tests
-            : [{ input: '2', expected: '2' }],
+          visible_tests: visible.length >= 1 ? visible : [{ input: '1', expected: '1' }],
+          hidden_tests: hidden.length >= 1 ? hidden : [{ input: '2', expected: '2' }],
+          references,
           validated: false,
           approved: false,
         };
       });
+
       setQuestions((prev) => [...prev, ...built]);
-      onNotify(`Uploaded ${built.length} question(s). Validate & approve before publishing.`, true);
+      onNotify(`Uploaded ${built.length} question(s) from Excel/CSV. Validate & approve before publishing.`, true);
     } catch {
-      onNotify('Invalid JSON file format for question upload.', false);
+      onNotify('Could not read Excel/CSV file. Use the template format (.xlsx or .csv).', false);
     }
   }
 
@@ -1736,10 +1865,10 @@ export function InstantTestStep({
               + Add manual question
             </button>
             <label className="btn" style={{ cursor: 'pointer', margin: 0 }}>
-              Upload JSON
+              Upload Excel
               <input
                 type="file"
-                accept=".json"
+                accept=".xlsx,.csv"
                 style={{ display: 'none' }}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
@@ -1748,6 +1877,9 @@ export function InstantTestStep({
                 }}
               />
             </label>
+            <button type="button" className="btn" onClick={downloadExcelTemplate}>
+              Excel template
+            </button>
             <span className={approvedQuestions.length >= approveTarget && allSlotsHaveApproved ? 'chip chip-ok' : 'chip'}>
               Approved: {approvedQuestions.length}/{approveTarget}
             </span>
