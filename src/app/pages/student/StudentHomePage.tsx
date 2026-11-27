@@ -51,19 +51,13 @@ export function StudentHomePage() {
       list = [];
     }
     if (list.length === 0) {
-      const facultyIds = Array.from(new Set((data?.courses ?? []).map((c) => c.faculty_id).filter(Boolean)));
-      if (facultyIds.length > 0) {
-        const { data: profs } = await supabase
-          .from('profiles')
-          .select('id, full_name, email, role')
-          .in('id', facultyIds);
-        list = (profs ?? []).map((p: { id: string; full_name: string; email: string; role: string }) => ({
-          id: p.id,
-          full_name: p.full_name,
-          email: p.email,
-          role: p.role,
-          relation: 'superior',
-        }));
+      try {
+        const fallback = await rpc<
+          Array<{ id: string; full_name: string; email: string; role: string; relation: string }>
+        >('student_list_course_faculty', {});
+        list = fallback ?? [];
+      } catch {
+        list = [];
       }
     }
     setFacultyContacts(list);
