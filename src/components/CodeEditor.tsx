@@ -35,8 +35,8 @@ function languageExtension(lang: SupportedLang) {
 const xeioDarkTheme = EditorView.theme(
   {
     '&': {
-      backgroundColor: '#1B1B1A',
-      color: '#E8E6DF',
+      backgroundColor: '#1E1E1E',
+      color: '#D4D4D4',
       height: '100%',
       fontSize: '13px',
       fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
@@ -47,17 +47,17 @@ const xeioDarkTheme = EditorView.theme(
       lineHeight: '1.6',
     },
     '.cm-gutters': {
-      backgroundColor: '#1B1B1A',
-      color: '#6B6A63',
+      backgroundColor: '#1E1E1E',
+      color: '#6E7681',
       border: 'none',
       paddingRight: '8px',
     },
     '.cm-activeLineGutter': {
-      backgroundColor: '#252422',
-      color: '#CFCDC5',
+      backgroundColor: '#2A2D2E',
+      color: '#D4D4D4',
     },
     '.cm-activeLine': {
-      backgroundColor: '#252422',
+      backgroundColor: '#2A2D2E',
     },
     '&.cm-focused': {
       outline: '2px solid #3FA9F5',
@@ -67,19 +67,26 @@ const xeioDarkTheme = EditorView.theme(
       borderLeftColor: '#FFFFFF',
     },
     '.cm-selectionBackground, ::selection': {
-      backgroundColor: '#2C3E50',
+      backgroundColor: '#264F78',
     },
   },
   { dark: true },
 );
 
 const xeioHighlight = HighlightStyle.define([
-  { tag: tags.keyword, color: '#3FA9F5' },
-  { tag: tags.comment, color: '#8F8D85', fontStyle: 'italic' },
-  { tag: tags.string, color: '#9FE0BC' },
-  { tag: tags.number, color: '#E8A26B' },
-  { tag: tags.typeName, color: '#7FB5A7' },
-  { tag: tags.function(tags.variableName), color: '#E8E6DF' },
+  { tag: tags.keyword, color: '#569CD6' },
+  { tag: tags.controlKeyword, color: '#C586C0' },
+  { tag: [tags.meta, tags.processingInstruction], color: '#858585' },
+  { tag: tags.comment, color: '#6A9955', fontStyle: 'italic' },
+  { tag: [tags.string, tags.character], color: '#98C379' },
+  { tag: [tags.number, tags.integer, tags.float], color: '#D19A66' },
+  { tag: [tags.bool, tags.null], color: '#569CD6' },
+  { tag: [tags.typeName, tags.standard(tags.typeName)], color: '#4EC9B0' },
+  { tag: tags.function(tags.variableName), color: '#DCDCAA' },
+  { tag: tags.variableName, color: '#D4D4D4' },
+  { tag: [tags.brace, tags.paren], color: '#E5C07B' },
+  { tag: tags.squareBracket, color: '#61AFEF' },
+  { tag: [tags.operator, tags.punctuation], color: '#D4D4D4' },
 ]);
 
 export function CodeEditor({
