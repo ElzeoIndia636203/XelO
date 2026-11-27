@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Card, Empty, ErrorNote, Loading, PageHead } from '../../../components/ui';
+import { Banner, Card, Empty, ErrorNote, Loading, PageHead } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import { isEligibleForEndsem, paperMarksBreakdown, type AssessmentRules } from '../../../lib/logic/endsem';
 import {
@@ -63,6 +63,7 @@ export function StudentEndsemPage() {
   const [instantName, setInstantName] = useState('');
   const [instantBusy, setInstantBusy] = useState(false);
   const [instantErr, setInstantErr] = useState('');
+  const [instantNotice, setInstantNotice] = useState('');
 
   async function joinInstantTest(e: React.FormEvent) {
     e.preventDefault();
@@ -72,6 +73,7 @@ export function StudentEndsemPage() {
     }
     setInstantBusy(true);
     setInstantErr('');
+    setInstantNotice('');
     const { data, error } = await supabase.rpc('student_join_instant_test', {
       p_code: instantCode.trim().toUpperCase(),
       p_prn: instantPrn.trim(),
@@ -82,16 +84,23 @@ export function StudentEndsemPage() {
       setInstantErr(errorMessage(error?.message ?? 'not_found'));
       return;
     }
-    const res = data as { attempt_id: string };
+    const res = data as { status?: string; attempt_id?: string; topic?: string };
+    if (res.status === 'pending' || !res.attempt_id) {
+      setInstantNotice(
+        `Join request sent for "${res.topic ?? instantCode.trim().toUpperCase()}". Waiting for faculty approval before entering.`,
+      );
+      return;
+    }
     navigate(`/student/instant-test/${res.attempt_id}`);
   }
 
   const instantJoinCard = (
-    <Card title="Attend instant coding test">
+    <Card title="Join live test using code">
       <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
-        Enter the 6-character test code shared by your faculty along with your PRN and full name.
+        Enter the 6-character test code shared by your faculty along with your PRN and full name. Faculty must approve your request before you can enter and appear in the report.
       </p>
       {instantErr && <ErrorNote message={instantErr} />}
+      {instantNotice && <Banner tone="ok">{instantNotice}</Banner>}
       <form onSubmit={joinInstantTest} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
         <label className="field-label">
           Test code

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Banner, Card, Chip, Empty } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import {
@@ -48,6 +48,54 @@ export function BatchesStep({
   const [batchEdits, setBatchEdits] = useState<
     Record<string, { slot: string; room: string; staff: string }>
   >({});
+  const [joinRequests, setJoinRequests] = useState<
+    Array<{
+      id: string;
+      batch_name: string;
+      class_code: string;
+      student_id: string;
+      student_name: string;
+      student_email: string;
+      roll_no: string;
+      status: 'pending' | 'approved' | 'rejected';
+      requested_at: string;
+    }>
+  >([]);
+
+  const loadJoinRequests = useCallback(async () => {
+    try {
+      const rows = await rpc<typeof joinRequests>('faculty_list_class_join_requests', {
+        p_course_id: course.id,
+      });
+      setJoinRequests(rows ?? []);
+    } catch {
+      setJoinRequests([]);
+    }
+  }, [course.id]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void loadJoinRequests();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [loadJoinRequests]);
+
+  async function reviewJoinRequest(requestId: string, approve: boolean) {
+    setBusy(true);
+    try {
+      await rpc('faculty_review_class_join_request', {
+        p_request_id: requestId,
+        p_approve: approve,
+      });
+      onNotify(approve ? 'Student join request approved and enrolled.' : 'Student join request declined.', true);
+      await loadJoinRequests();
+      onRefresh();
+    } catch (e) {
+      onNotify(errorMessage(e), false);
+    } finally {
+      setBusy(false);
+    }
+  }
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkTargetBatchId, setBulkTargetBatchId] = useState('');
@@ -390,6 +438,52 @@ export function BatchesStep({
           ) : null}
         </div>
       </Card>
+
+      {joinRequests.some((r) => r.status === 'pending') ? (
+        <Card title="Class join requests awaiting approval">
+          <table>
+            <thead>
+              <tr>
+                <th>Roll no</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Batch / Code</th>
+                <th style={{ textAlign: 'right' }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {joinRequests
+                .filter((r) => r.status === 'pending')
+                .map((r) => (
+                  <tr key={r.id}>
+                    <td className="mono">{r.roll_no || '—'}</td>
+                    <td>{r.student_name}</td>
+                    <td className="mono">{r.student_email}</td>
+                    <td className="mono">{r.batch_name} ({r.class_code})</td>
+                    <td style={{ textAlign: 'right', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary field-sm"
+                        disabled={busy}
+                        onClick={() => void reviewJoinRequest(r.id, true)}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="btn field-sm"
+                        disabled={busy}
+                        onClick={() => void reviewJoinRequest(r.id, false)}
+                      >
+                        Decline
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </Card>
+      ) : null}
 
       <Card title="Invite individual student (Institutional, Gmail, or Outlook)">
         <form onSubmit={inviteSingleStudent} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>

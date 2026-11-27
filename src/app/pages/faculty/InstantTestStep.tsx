@@ -70,6 +70,10 @@ interface InstantParticipantRow {
   batch_id: string | null;
   attendance_status: 'pending' | 'present' | 'absent';
   added_manually: boolean;
+  approval_status?: 'pending' | 'approved' | 'rejected';
+  requested_via_code?: boolean;
+  requested_prn?: string | null;
+  requested_name?: string | null;
 }
 
 interface InstantAnswerItem {
@@ -496,6 +500,23 @@ export function InstantTestStep({
     }
   }
 
+  async function reviewJoinRequest(testId: string, studentId: string, approve: boolean) {
+    setBusy(true);
+    try {
+      await rpc('faculty_review_instant_join_request', {
+        p_test_id: testId,
+        p_student_id: studentId,
+        p_approve: approve,
+      });
+      onNotify(approve ? 'Student approved and admitted to the test.' : 'Join request declined.', true);
+      await reloadAll();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function finalizeMarks(test: InstantTestRow) {
     if (!window.confirm(`Submit & approve final marks for "${test.topic}"?`)) return;
     setBusy(true);
@@ -890,8 +911,15 @@ export function InstantTestStep({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {tests.map((t) => {
-              const attempts = (attemptsByTest[t.id] ?? []).slice().sort((a, b) => a.prn.localeCompare(b.prn));
               const parts = participantsByTest[t.id] ?? [];
+              const pendingRequests = parts.filter((p) => p.approval_status === 'pending');
+              const approvedIds = new Set(
+                parts.filter((p) => (p.approval_status ?? 'approved') === 'approved').map((p) => p.student_id),
+              );
+              const attempts = (attemptsByTest[t.id] ?? [])
+                .filter((a) => parts.length === 0 || approvedIds.has(a.student_id))
+                .slice()
+                .sort((a, b) => a.prn.localeCompare(b.prn));
               return (
                 <div key={t.id} style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -899,7 +927,7 @@ export function InstantTestStep({
                       <span className="mono" style={{ fontSize: 14, fontWeight: 700, padding: '2px 8px', background: '#DCEBE6', color: '#0E5E52', borderRadius: 4, marginRight: 8 }}>
                         {t.test_code}
                       </span>
-                      <strong>{t.topic}</strong> · {t.question_count} Qs · {t.total_marks} marks · {t.scope_type} ({parts.length} assigned)
+                      <strong>{t.topic}</strong> · {t.question_count} Qs · {t.total_marks} marks · {t.scope_type} ({approvedIds.size} approved)
                       {t.scheduled_at ? ` · ${formatDateTimeIst(t.scheduled_at)}` : ''}
                     </div>
                     <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -951,6 +979,46 @@ export function InstantTestStep({
                       </button>
                     </div>
                   </div>
+
+                  {pendingRequests.length > 0 && (
+                    <div style={{ marginTop: 10, padding: 10, borderRadius: 6, border: '1px solid var(--assist)', background: '#FFF8F0' }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
+                        Join requests via code ({pendingRequests.length} waiting approval — not in reports until approved)
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {pendingRequests.map((req) => {
+                          const prof = studentProfiles.find((s) => s.id === req.student_id);
+                          const dispName = req.requested_name || prof?.full_name || prof?.email || req.student_id;
+                          const dispPrn = req.requested_prn || prof?.roll_no || '—';
+                          return (
+                            <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                              <span>
+                                <strong className="mono">{dispPrn}</strong> · {dispName}
+                              </span>
+                              <span style={{ display: 'inline-flex', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary field-sm"
+                                  disabled={busy}
+                                  onClick={() => void reviewJoinRequest(t.id, req.student_id, true)}
+                                >
+                                  Approve & admit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn field-sm"
+                                  disabled={busy}
+                                  onClick={() => void reviewJoinRequest(t.id, req.student_id, false)}
+                                >
+                                  Decline
+                                </button>
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {attempts.length > 0 && (
                     <table style={{ marginTop: 10 }}>
@@ -1194,7 +1262,14 @@ export function InstantTestStep({
         onClose={() => setReportTest(null)}
       >
         {reportTest ? (() => {
-          const rows = (attemptsByTest[reportTest.id] ?? []).slice().sort((a, b) => a.prn.localeCompare(b.prn));
+          const rParts = participantsByTest[reportTest.id] ?? [];
+          const rApprovedIds = new Set(
+            rParts.filter((p) => (p.approval_status ?? 'approved') === 'approved').map((p) => p.student_id),
+          );
+          const rows = (attemptsByTest[reportTest.id] ?? [])
+            .filter((a) => rParts.length === 0 || rApprovedIds.has(a.student_id))
+            .slice()
+            .sort((a, b) => a.prn.localeCompare(b.prn));
           const generatedAt = formatDateTimeIst(new Date().toISOString());
           const conductedAt = reportTest.conducted_at ? formatDateTimeIst(reportTest.conducted_at) : '—';
           return (

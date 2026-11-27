@@ -28,8 +28,10 @@ export function StudentHomePage() {
   const { profile } = useSession();
   const navigate = useNavigate();
   const [classCode, setClassCode] = useState('');
+  const [liveTestCode, setLiveTestCode] = useState('');
   const [joinMsg, setJoinMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [busyJoin, setBusyJoin] = useState(false);
+  const [busyLiveTestJoin, setBusyLiveTestJoin] = useState(false);
   const [launchingTestId, setLaunchingTestId] = useState<string | null>(null);
   const [requestMeetingOpen, setRequestMeetingOpen] = useState(false);
   const [facultyContacts, setFacultyContacts] = useState<
@@ -61,9 +63,13 @@ export function StudentHomePage() {
     const courseIds = Array.from(new Set(enrollments.map((e) => e.course_id)));
     const batchIds = Array.from(new Set(enrollments.map((e) => e.batch_id)));
 
-    const [courses, batches, sessions, submissions, attempts, attendance, vivas, classTasks, instantTests] =
+    const [
+      [courses, batches, sessions, submissions, attempts, attendance, vivas, classTasks],
+      instantTests,
+      classJoinRequests,
+    ] = await Promise.all([
       courseIds.length > 0
-        ? await Promise.all([
+        ? Promise.all([
             fetchAll<Course>((from, to) =>
               supabase.from('courses').select('*').in('id', courseIds).range(from, to),
             ),
@@ -94,29 +100,52 @@ export function StudentHomePage() {
                 .order('due_at')
                 .range(from, to),
             ),
-            rpc<
-              Array<{
-                test_id: string;
-                course_id: string;
-                course_code: string;
-                course_title: string;
-                test_code: string;
-                topic: string;
-                total_marks: number;
-                pretest_count: number;
-                viva_marks: number;
-                status: string;
-                active: boolean;
-                scheduled_at: string | null;
-                attendance_status: string;
-                attempt_id: string | null;
-                submitted_at: string | null;
-                final_score: number | null;
-                marks_approved: boolean;
-              }>
-            >('student_list_instant_tests').catch(() => []),
           ])
-        : [[], [], [], [], [], [], [], [], []];
+        : Promise.resolve([[], [], [], [], [], [], [], []] as [
+            Course[],
+            Batch[],
+            SessionRow[],
+            SubmissionRow[],
+            TestAttemptRow[],
+            AttendanceRow[],
+            VivaRow[],
+            Array<{ id: string; course_id: string; title: string; due_at: string | null; kind: string }>,
+          ]),
+      rpc<
+        Array<{
+          test_id: string;
+          course_id: string;
+          course_code: string;
+          course_title: string;
+          test_code: string;
+          topic: string;
+          total_marks: number;
+          pretest_count: number;
+          viva_marks: number;
+          status: string;
+          active: boolean;
+          scheduled_at: string | null;
+          attendance_status: string;
+          approval_status?: 'pending' | 'approved' | 'rejected';
+          attempt_id: string | null;
+          submitted_at: string | null;
+          final_score: number | null;
+          marks_approved: boolean;
+        }>
+      >('student_list_instant_tests').catch(() => []),
+      rpc<
+        Array<{
+          id: string;
+          course_id: string;
+          course_code: string;
+          course_title: string;
+          batch_name: string;
+          class_code: string;
+          status: 'pending' | 'approved' | 'rejected';
+          requested_at: string;
+        }>
+      >('student_list_class_join_requests').catch(() => []),
+    ]);
 
     const sessionIds = sessions.map((s) => s.id);
     const [sessionQuestions, sessionRuns] =
@@ -142,6 +171,7 @@ export function StudentHomePage() {
       vivas,
       classTasks,
       instantTests,
+      classJoinRequests,
       sessionQuestions,
       sessionRuns,
     };
@@ -152,14 +182,54 @@ export function StudentHomePage() {
     setJoinMsg(null);
     setBusyJoin(true);
     try {
-      await rpc('join_with_code', { p_class_code: classCode.trim() });
+      const res = await rpc<{ status: string; batch_name?: string; course_code?: string }>('student_request_join_class', {
+        p_code: classCode.trim(),
+      });
       setClassCode('');
-      setJoinMsg({ text: 'Joined course successfully.', ok: true });
+      setJoinMsg({
+        text:
+          res.status === 'already_enrolled'
+            ? 'You are already enrolled in this course.'
+            : `Join request sent for ${res.course_code ?? 'course'} (${res.batch_name ?? 'batch'}). Waiting for faculty approval.`,
+        ok: true,
+      });
       reload();
     } catch (err) {
       setJoinMsg({ text: errorMessage(err), ok: false });
     } finally {
       setBusyJoin(false);
+    }
+  }
+
+  async function handleJoinLiveTest(e: FormEvent) {
+    e.preventDefault();
+    if (!liveTestCode.trim()) return;
+    setJoinMsg(null);
+    setBusyLiveTestJoin(true);
+    try {
+      const res = await rpc<{ status: string; attempt_id?: string; topic?: string }>(
+        'student_request_join_instant_test',
+        {
+          p_code: liveTestCode.trim().toUpperCase(),
+        },
+      );
+      setLiveTestCode('');
+      if (res.status === 'approved' && res.attempt_id) {
+        navigate(`/student/instant/${res.attempt_id}`);
+        return;
+      }
+      setJoinMsg({
+        text:
+          res.status === 'approved_waiting_start'
+            ? `You are approved for "${res.topic ?? 'test'}". Waiting for faculty to activate the test.`
+            : `Join request sent for "${res.topic ?? 'live test'}". Faculty must approve before you can enter and appear in reports.`,
+        ok: true,
+      });
+      reload();
+    } catch (err) {
+      setJoinMsg({ text: errorMessage(err), ok: false });
+    } finally {
+      setBusyLiveTestJoin(false);
     }
   }
 
@@ -261,24 +331,56 @@ export function StudentHomePage() {
             </button>
             <form onSubmit={handleJoin} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
               <label className="field-label">
-                Class code from your invite
+                Join class using code
                 <input
                   className="field mono"
                   required
                   value={classCode}
                   onChange={(e) => setClassCode(e.target.value)}
                   placeholder="e.g. CS7Q4K"
-                  style={{ width: 170 }}
+                  style={{ width: 150 }}
                 />
               </label>
               <button type="submit" className="btn btn-primary" disabled={busyJoin}>
-                {busyJoin ? 'Joining…' : 'Join'}
+                {busyJoin ? 'Sending…' : 'Request join'}
+              </button>
+            </form>
+            <form onSubmit={handleJoinLiveTest} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
+              <label className="field-label">
+                Join live test using code
+                <input
+                  className="field mono"
+                  required
+                  value={liveTestCode}
+                  onChange={(e) => setLiveTestCode(e.target.value.toUpperCase())}
+                  placeholder="e.g. K7P9M2"
+                  style={{ width: 150 }}
+                />
+              </label>
+              <button type="submit" className="btn btn-teal" disabled={busyLiveTestJoin}>
+                {busyLiveTestJoin ? 'Sending…' : 'Request test'}
               </button>
             </form>
           </div>
         </div>
 
         {joinMsg ? <Banner tone={joinMsg.ok ? 'ok' : 'err'}>{joinMsg.text}</Banner> : null}
+        {data && data.classJoinRequests.some((r) => r.status === 'pending') ? (
+          <Card title="Pending class join requests">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {data.classJoinRequests
+                .filter((r) => r.status === 'pending')
+                .map((r) => (
+                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+                    <span>
+                      <strong>{r.course_code}</strong> · {r.course_title} ({r.batch_name}, code <span className="mono">{r.class_code}</span>)
+                    </span>
+                    <Chip tone="warn">Pending faculty approval</Chip>
+                  </div>
+                ))}
+            </div>
+          </Card>
+        ) : null}
         {error ? <ErrorNote message={error} /> : null}
         {loading && !data ? <Loading label="Loading student courses…" /> : null}
 
@@ -287,12 +389,15 @@ export function StudentHomePage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {data.instantTests.map((t) => {
                 const isLive = t.status === 'active' && t.active;
+                const approval = t.approval_status ?? 'approved';
+                const canEnter = approval === 'approved' && isLive;
                 return (
                   <button
                     key={t.test_id}
                     type="button"
-                    disabled={launchingTestId === t.test_id}
+                    disabled={launchingTestId === t.test_id || approval === 'pending' || approval === 'rejected'}
                     onClick={async () => {
+                      if (approval !== 'approved') return;
                       if (t.attempt_id) {
                         navigate(`/student/instant/${t.attempt_id}`);
                         return;
@@ -339,9 +444,15 @@ export function StudentHomePage() {
                       </div>
                     </div>
                     <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                      <Chip tone={isLive ? 'good' : t.status === 'scheduled' ? 'warn' : 'neutral'}>
-                        {isLive ? 'Live · Open portal' : t.status}
-                      </Chip>
+                      {approval === 'pending' ? (
+                        <Chip tone="warn">Pending faculty approval</Chip>
+                      ) : approval === 'rejected' ? (
+                        <Chip tone="bad">Declined</Chip>
+                      ) : (
+                        <Chip tone={canEnter ? 'good' : t.status === 'scheduled' ? 'warn' : 'neutral'}>
+                          {canEnter ? 'Live · Open portal' : t.status}
+                        </Chip>
+                      )}
                       {t.attendance_status === 'absent' ? <Chip tone="bad">Absent</Chip> : null}
                     </div>
                   </button>
