@@ -547,7 +547,14 @@ export function StudentInstantTestPage() {
           void lockAndAdvance(idx);
         }}
         sessionEndsLabel={`Score: ${payload.final_score ?? payload.total_score}/${payload.total_marks}`}
-        onSaveDraft={async () => {}}
+        onSaveDraft={async (questionId, lang, code) => {
+          await rpc('student_save_instant_draft', {
+            p_attempt_id: payload.attempt_id,
+            p_question_id: questionId,
+            p_lang: lang,
+            p_code: code,
+          });
+        }}
         onRunCompleted={loadAttempt}
         onExit={async () => {
           await supabase.rpc('student_submit_instant_test', { p_attempt_id: payload.attempt_id });

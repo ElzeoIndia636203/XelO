@@ -285,3 +285,45 @@ BEGIN
   );
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION student_save_instant_draft(
+  p_attempt_id uuid,
+  p_question_id text,
+  p_lang text,
+  p_code text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_attempt public.instant_test_attempts%ROWTYPE;
+  v_existing jsonb;
+  v_merged jsonb;
+BEGIN
+  SELECT * INTO v_attempt FROM public.instant_test_attempts WHERE id = p_attempt_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'not_found';
+  END IF;
+  IF v_attempt.student_id <> auth.uid() THEN
+    RAISE EXCEPTION 'forbidden';
+  END IF;
+  IF v_attempt.submitted_at IS NOT NULL THEN
+    RETURN;
+  END IF;
+
+  v_existing := COALESCE(v_attempt.answers -> p_question_id, '{}'::jsonb);
+  v_merged := v_existing || jsonb_build_object(
+    'lang', coalesce(nullif(trim(p_lang), ''), 'c'),
+    'code', coalesce(p_code, ''),
+    'updated_at', now()
+  );
+
+  UPDATE public.instant_test_attempts
+  SET answers = jsonb_set(COALESCE(answers, '{}'::jsonb), ARRAY[p_question_id], v_merged, true)
+  WHERE id = p_attempt_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION student_save_instant_draft(uuid, text, text, text) TO authenticated;

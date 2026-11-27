@@ -220,6 +220,7 @@ export function InstantTestStep({
   const [gradeReason, setGradeReason] = useState('');
   const [gradeViva, setGradeViva] = useState('0');
   const [reportTest, setReportTest] = useState<InstantTestRow | null>(null);
+  const [liveInspectAttemptId, setLiveInspectAttemptId] = useState<string | null>(null);
 
   const selectedCo = outcomes.find((o) => o.id === coId) ?? outcomes[0] ?? null;
   const getSlotCo = (slot: number) => {
@@ -1221,7 +1222,24 @@ export function InstantTestStep({
                         return (
                           <tr key={a.id}>
                             <td className="mono">{a.prn}</td>
-                            <td>{a.student_name}</td>
+                            <td>
+                              <button
+                                type="button"
+                                onClick={() => setLiveInspectAttemptId(a.id)}
+                                style={{
+                                  background: 'none',
+                                  border: 0,
+                                  padding: 0,
+                                  color: 'var(--accent)',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  textDecoration: 'underline',
+                                  textAlign: 'left',
+                                }}
+                              >
+                                {a.student_name}
+                              </button>
+                            </td>
                             <td>
                               <Chip tone={a.cheating_marked || a.auto_submitted_breach ? 'bad' : a.submitted_at ? 'good' : 'warn'}>
                                 {stateLabel}
@@ -1231,6 +1249,13 @@ export function InstantTestStep({
                             <td className="mono">{Math.round(a.integrity_score ?? 100)}/100</td>
                             <td className="mono">{resets}/2</td>
                             <td style={{ textAlign: 'right', display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="btn field-sm"
+                                onClick={() => setLiveInspectAttemptId(a.id)}
+                              >
+                                Live insights
+                              </button>
                               <button
                                 type="button"
                                 className="btn field-sm"
@@ -2562,6 +2587,148 @@ export function InstantTestStep({
           </form>
         ) : null}
       </Modal>
+
+      {liveInspectAttemptId && selectedTest ? (() => {
+        const liveAtt = (attemptsByTest[selectedTest.id] ?? []).find((x) => x.id === liveInspectAttemptId) ?? null;
+        if (!liveAtt) return null;
+        const studentEvents = proctorEvents.filter((ev) => ev.instant_attempt_id === liveAtt.id);
+        const ansEntries = Object.entries(liveAtt.answers ?? {});
+        const resets = liveAtt.reset_count ?? 0;
+        return (
+          <Modal
+            open
+            title={`Live insights · ${liveAtt.student_name} (${liveAtt.prn})`}
+            onClose={() => setLiveInspectAttemptId(null)}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '76vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                <Chip tone={liveAtt.cheating_marked || liveAtt.auto_submitted_breach ? 'bad' : liveAtt.submitted_at ? 'good' : 'warn'}>
+                  {liveAtt.cheating_marked
+                    ? 'Terminated (Cheating)'
+                    : liveAtt.auto_submitted_breach
+                      ? 'Auto-submitted (2nd breach)'
+                      : liveAtt.submitted_at
+                        ? 'Submitted'
+                        : 'Live'}
+                </Chip>
+                <Chip tone={(liveAtt.warning_count ?? 0) > 0 ? 'warn' : 'good'}>
+                  Breaches: {liveAtt.warning_count ?? 0}/2
+                </Chip>
+                <Chip tone="neutral">Integrity: {Math.round(liveAtt.integrity_score ?? 100)}/100</Chip>
+                <Chip tone="neutral">Resets: {resets}/2</Chip>
+                <Chip tone="neutral">Coding score: {liveAtt.coding_score}/{selectedTest.total_marks}</Chip>
+                <button type="button" className="btn field-sm" onClick={() => void fetchTests()}>
+                  Refresh
+                </button>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                  Code typed & test cases passed ({ansEntries.length} question{ansEntries.length === 1 ? '' : 's'})
+                </div>
+                {ansEntries.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                    No code typed or test runs recorded yet.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {ansEntries.map(([qid, ans], idx) => {
+                      const qMeta = (selectedTest.questions ?? []).find((q) => q.id === qid);
+                      return (
+                        <div key={qid} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                            <strong style={{ fontSize: 13 }}>
+                              Q{idx + 1}: {qMeta?.title ?? qid}
+                            </strong>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <Chip tone="neutral">{(ans.lang ?? 'c').toUpperCase()}</Chip>
+                              <Chip tone={(ans.visible_passed ?? 0) > 0 ? 'good' : 'neutral'}>
+                                Visible: {ans.visible_passed ?? 0}/{ans.visible_total ?? selectedTest.visible_count}
+                              </Chip>
+                              <Chip tone={(ans.hidden_passed ?? 0) > 0 ? 'good' : 'neutral'}>
+                                Hidden: {ans.hidden_passed ?? 0}/{ans.hidden_total ?? selectedTest.hidden_count}
+                              </Chip>
+                              <Chip tone="neutral">Marks: {ans.marks_awarded ?? 0}</Chip>
+                            </div>
+                          </div>
+                          <pre
+                            className="mono"
+                            style={{
+                              margin: 0,
+                              padding: 10,
+                              borderRadius: 6,
+                              background: '#141413',
+                              color: '#E8E6DF',
+                              fontSize: 12,
+                              maxHeight: 220,
+                              overflow: 'auto',
+                              whiteSpace: 'pre-wrap',
+                            }}
+                          >
+                            {ans.code?.trim() ? ans.code : '// No code typed yet'}
+                          </pre>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                  Student proctor log & breaches ({studentEvents.length})
+                </div>
+                {studentEvents.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No proctor events logged for this student.</div>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Rule</th>
+                        <th>Level</th>
+                        <th>Detail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {studentEvents.map((ev) => (
+                        <tr key={ev.id}>
+                          <td className="mono">{formatDateTimeIst(ev.at)}</td>
+                          <td className="mono">{ev.rule_id}</td>
+                          <td><Chip tone={ev.level === 'S2' || ev.level === 'S3' ? 'bad' : ev.level === 'S1' ? 'warn' : 'neutral'}>{ev.level}</Chip></td>
+                          <td>{ev.detail}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn field-sm"
+                  disabled={busy || resets >= 2 || Boolean(liveAtt.cheating_marked)}
+                  onClick={() => void resetAttempt(liveAtt.id, liveAtt.prn)}
+                >
+                  Reset ({resets}/2)
+                </button>
+                <button
+                  type="button"
+                  className="btn field-sm"
+                  disabled={busy || Boolean(liveAtt.cheating_marked)}
+                  onClick={() => void markCheatingAndTerminate(liveAtt.id, liveAtt.prn)}
+                >
+                  Mark cheating & terminate
+                </button>
+                <button type="button" className="btn btn-primary field-sm" onClick={() => setLiveInspectAttemptId(null)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })() : null}
 
       <Modal
         open={reportTest !== null}
