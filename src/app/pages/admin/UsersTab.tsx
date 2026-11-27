@@ -25,15 +25,10 @@ const ROLE_LABELS: Record<UserRole, string> = {
 };
 
 const HARIPRASATH_K = 'hariprasathk@flyy4.com';
-const GOWTHAM_SIR = 'gowtham.manivel@flyy4.com';
-const DEV_ELZEO = 'dev.elzeo@flyy4.com';
 
-function canManageTarget(actorEmail: string, targetEmail: string): boolean {
-  const actor = actorEmail.trim().toLowerCase();
+function canManageTarget(_actorEmail: string, targetEmail: string): boolean {
   const target = targetEmail.trim().toLowerCase();
   if (target === HARIPRASATH_K) return false;
-  if (actor === DEV_ELZEO && target === GOWTHAM_SIR) return false;
-  if (target === DEV_ELZEO && actor !== HARIPRASATH_K && actor !== GOWTHAM_SIR) return false;
   return true;
 }
 
