@@ -509,13 +509,17 @@ th {
 .console-rail {
   flex: 1 1 232px;
   max-width: 272px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--rail);
   color: #e8e6df;
   padding: 20px 14px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  overflow: hidden;
   transition: flex-basis 180ms ease, max-width 180ms ease, padding 180ms ease, opacity 180ms ease;
 }
 
@@ -643,6 +647,9 @@ th {
   }
 
   .console-rail {
+    position: static;
+    height: auto;
+    overflow-y: visible;
     max-width: none;
     width: 100%;
     padding: 14px;
