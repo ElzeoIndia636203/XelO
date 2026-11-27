@@ -93,13 +93,13 @@ export function StudentHomePage() {
             ),
             fetchAll<{ id: string; course_id: string; title: string; due_at: string | null; kind: string }>((from, to) =>
               supabase
-                .from('class_posts')
+                .from('class_items')
                 .select('id, course_id, title, due_at, kind')
                 .in('course_id', courseIds)
                 .not('due_at', 'is', null)
                 .order('due_at')
                 .range(from, to),
-            ),
+            ).catch(() => []),
           ])
         : Promise.resolve([[], [], [], [], [], [], [], []] as [
             Course[],
