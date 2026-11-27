@@ -136,6 +136,22 @@ export function Workbench({
     setCodeMap((prev) => new Map(prev).set(key, nextCode));
   }
 
+  function handleResetCode() {
+    if (!activeQ || isPreview) return;
+    if (!window.confirm(`Reset ${fileForLang(activeLang)} to the starter template?`)) return;
+    const starter = starterForLang(activeLang);
+    const key = `${activeQ.id}:${activeLang}`;
+    dirtyRef.current.add(key);
+    setSaveLabel('unsaved');
+    setCodeMap((prev) => new Map(prev).set(key, starter));
+    setRunOutputs((prev) => {
+      const next = new Map(prev);
+      next.delete(activeQ.id);
+      return next;
+    });
+    setActionErr(null);
+  }
+
   async function execute(runMode: 'run' | 'submit') {
     if (!activeQ || isPreview) return;
     setActionErr(null);
@@ -388,6 +404,24 @@ export function Workbench({
           </span>
         ) : null}
 
+        <button
+          type="button"
+          disabled={isPreview || busyMode !== null || !activeQ}
+          onClick={handleResetCode}
+          style={{
+            minHeight: 32,
+            padding: '0 12px',
+            border: '1px solid #3A3936',
+            borderRadius: 5,
+            background: '#1F1F1D',
+            color: '#CFCDC5',
+            fontSize: 12.5,
+            cursor: isPreview ? 'not-allowed' : 'pointer',
+            opacity: isPreview ? 0.55 : 1,
+          }}
+        >
+          Reset
+        </button>
         <button
           type="button"
           disabled={isPreview || busyMode !== null || !activeQ}
