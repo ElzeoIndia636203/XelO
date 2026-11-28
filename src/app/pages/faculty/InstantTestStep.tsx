@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Banner, Card, Chip, Empty, Modal } from '../../../components/ui';
-import { PrintableReportFrame } from '../../../components/DigitalReportFooter';
+import { InstantTestPerformanceReport } from '../../../components/InstantTestPerformanceReport';
 import { errorMessage } from '../../../lib/errors';
 import { formatDateTimeIst } from '../../../lib/format';
 import { useSession } from '../../../lib/session';
@@ -58,13 +58,25 @@ interface InstantTestRow {
   pretest_count: number;
   pretest_difficulty: string;
   pretest_marks: number;
+  posttest_count?: number;
+  posttest_marks?: number;
   viva_marks: number;
   scope_type: 'class' | 'batch' | 'students';
   status: 'scheduled' | 'active' | 'closed' | 'finalized';
   scheduled_at: string | null;
   conducted_at: string | null;
   allowed_langs: string[];
-  questions?: Array<{ id?: string; title: string; statement: string; difficulty: string; marks: number }>;
+  questions?: Array<{
+    id?: string;
+    slot?: number;
+    title: string;
+    statement: string;
+    difficulty: string;
+    marks: number;
+    co_code?: string;
+    visible_marks?: number;
+    hidden_marks?: number;
+  }>;
   active: boolean;
   created_at: string;
 }
@@ -221,6 +233,22 @@ export function InstantTestStep({
   const [gradeReason, setGradeReason] = useState('');
   const [gradeViva, setGradeViva] = useState('0');
   const [reportTest, setReportTest] = useState<InstantTestRow | null>(null);
+  const [departmentName, setDepartmentName] = useState('Computer Science and Engineering');
+
+  useEffect(() => {
+    let cancelled = false;
+    void supabase
+      .from('departments')
+      .select('name')
+      .eq('id', course.department_id)
+      .maybeSingle<{ name: string }>()
+      .then(({ data }) => {
+        if (!cancelled && data?.name) setDepartmentName(data.name);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [course.department_id]);
   const [liveInspectAttemptId, setLiveInspectAttemptId] = useState<string | null>(null);
   const [liveInsightEvents, setLiveInsightEvents] = useState<InstantProctorEventRow[]>([]);
   const [liveInsightLoading, setLiveInsightLoading] = useState(false);
@@ -2805,56 +2833,18 @@ export function InstantTestStep({
           const universityName = institution?.name ?? 'University';
           return (
             <div className="printable-report-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '76vh', overflowY: 'auto' }}>
-              <PrintableReportFrame
-                facultyName={facultyName}
-                timestamp={generatedAt}
+              <InstantTestPerformanceReport
                 universityName={universityName}
-                officialTitle="Official Assessment Performance Report"
-                officialSubtitle={`${course.code} · ${course.title} · ${reportTest.topic} (${reportTest.test_code})`}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ fontSize: 12.5, padding: 10, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
-                    <div><strong>Course:</strong> {course.code} {course.title}</div>
-                    <div><strong>Assessment:</strong> {reportTest.topic} ({reportTest.test_code}) · CO: {reportTest.co_code || '—'}</div>
-                    <div><strong>Date of conduct:</strong> {conductedAt}</div>
-                    <div><strong>Report generated:</strong> {generatedAt}</div>
-                  </div>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Roll / PRN</th>
-                        <th>Student name</th>
-                        <th>Pre-test ({reportTest.pretest_marks})</th>
-                        <th>Visible</th>
-                        <th>Hidden</th>
-                        <th>Coding final</th>
-                        <th>Viva ({reportTest.viva_marks})</th>
-                        <th>Total ({reportTest.total_marks})</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((r) => {
-                        const ansList = Object.values(r.answers ?? {});
-                        const visSum = ansList.reduce((s, x) => s + Number(x.visible_marks_earned ?? 0), 0);
-                        const hidSum = ansList.reduce((s, x) => s + Number(x.hidden_marks_earned ?? 0), 0);
-                        const effCoding = r.coding_override_score ?? r.coding_score;
-                        return (
-                          <tr key={r.id}>
-                            <td className="mono">{r.prn}</td>
-                            <td>{r.student_name}</td>
-                            <td className="mono">{r.pretest_score}</td>
-                            <td className="mono">{visSum}</td>
-                            <td className="mono">{hidSum}</td>
-                            <td className="mono">{effCoding}</td>
-                            <td className="mono">{r.viva_score}</td>
-                            <td className="mono" style={{ fontWeight: 700 }}>{r.final_score}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </PrintableReportFrame>
+                departmentName={departmentName}
+                facultyName={facultyName}
+                course={course}
+                test={reportTest}
+                outcomes={outcomes}
+                institution={institution}
+                attempts={rows}
+                conductedAt={conductedAt}
+                generatedAt={generatedAt}
+              />
               <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 4 }}>
                 <button type="button" className="btn" onClick={() => setReportTest(null)}>
                   Close
