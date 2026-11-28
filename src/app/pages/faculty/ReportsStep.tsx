@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Banner, Card, Chip, Elzeo, Empty, Kpis, Loading, Seg, Wordmark } from '../../../components/ui';
+import { PrintableReportFrame } from '../../../components/DigitalReportFooter';
 import { computeReport, loadCourseData } from '../../../lib/api/report';
 import { errorMessage } from '../../../lib/errors';
-import { formatTimeIst } from '../../../lib/format';
+import { formatDateTimeIst, formatTimeIst } from '../../../lib/format';
 import { useLoad } from '../../../lib/hooks';
 import { histogram10, mean, normalPdf, sd, toCsv, downloadTextFile } from '../../../lib/logic/stats';
 import { buildZip } from '../../../lib/logic/zip';
+import { useSession } from '../../../lib/session';
 import { fn, rpc, supabase } from '../../../lib/supabase';
 import type { Course } from '../../../lib/types';
 
@@ -21,6 +23,7 @@ export function ReportsStep({
   onNotify: (msg: string, ok: boolean) => void;
   onRefresh: () => void;
 }) {
+  const { profile } = useSession();
   const { data: dataset, loading, error, reload } = useLoad(
     () => loadCourseData(course.id),
     [course.id],
@@ -258,6 +261,14 @@ export function ReportsStep({
   const finalApprovals = dataset.approvals.filter((a) => a.object_type === 'final_marks');
   const latestFinalRemark = finalApprovals[0]?.remark ?? null;
   const studentNameMap = new Map(dataset.students.map((s) => [s.id, s]));
+  const reportGeneratedAt = formatDateTimeIst(new Date().toISOString());
+  const reportFacultyName = profile?.full_name ?? 'Course Faculty';
+  const reportTitleByTab: Record<ReportsTabId, string> = {
+    file: 'Official Course File (NBA / NAAC)',
+    internal: 'Official Internal Attainment Report',
+    students: 'Official Student Lab Files Roster',
+    final: 'Official Final Marks Submission Report',
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -274,6 +285,14 @@ export function ReportsStep({
           onChange={(val) => setTab(val as ReportsTabId)}
         />
       </div>
+
+      <PrintableReportFrame
+        facultyName={reportFacultyName}
+        timestamp={reportGeneratedAt}
+        universityName={currentDataset.institution.name}
+        officialTitle={reportTitleByTab[tab]}
+        officialSubtitle={`${course.code} · ${course.title} · Semester ${course.semester} · ${course.academic_year}`}
+      >
 
       {tab === 'file' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -885,6 +904,7 @@ export function ReportsStep({
           </Card>
         </div>
       ) : null}
+      </PrintableReportFrame>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 export type Tone = 'good' | 'warn' | 'bad' | 'neutral';
 
@@ -194,11 +195,13 @@ export function Modal({
   open,
   title,
   onClose,
+  printable = false,
   children,
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
+  printable?: boolean;
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -207,6 +210,14 @@ export function Modal({
   useEffect(() => {
     onCloseRef.current = onClose;
   });
+
+  useEffect(() => {
+    if (!open || !printable) return;
+    document.body.classList.add('print-modal-active');
+    return () => {
+      document.body.classList.remove('print-modal-active');
+    };
+  }, [open, printable]);
 
   useEffect(() => {
     if (!open) return;
@@ -247,14 +258,20 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
+  const content = (
     <div
-      className="modal-backdrop"
+      className={printable ? 'modal-backdrop printable-modal-backdrop' : 'modal-backdrop'}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title} ref={dialogRef}>
+      <div
+        className={printable ? 'modal printable-modal' : 'modal'}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        ref={dialogRef}
+      >
         <div className="card-head">
           <h2 className="card-title">{title}</h2>
           <button type="button" className="btn btn-ghost" aria-label="Close" onClick={onClose}>
@@ -265,6 +282,8 @@ export function Modal({
       </div>
     </div>
   );
+
+  return printable ? createPortal(content, document.body) : content;
 }
 
 export function Bar({

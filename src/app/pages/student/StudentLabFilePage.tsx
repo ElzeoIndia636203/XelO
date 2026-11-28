@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { Card, Chip, Elzeo, Empty, ErrorNote, Loading, Wordmark } from '../../../components/ui';
+import { Card, Chip, Empty, ErrorNote, Loading } from '../../../components/ui';
+import { DigitalReportFooter } from '../../../components/DigitalReportFooter';
 import { loadCourseData, computeReport, type ComputedStudentReportRow } from '../../../lib/api/report';
 import { errorMessage } from '../../../lib/errors';
-import { formatDateIst, formatTimeIst } from '../../../lib/format';
+import { formatDateIst, formatDateTimeIst, formatTimeIst } from '../../../lib/format';
 import { useLoad } from '../../../lib/hooks';
 import { qrSvgData, verificationCode } from '../../../lib/logic/qr';
 import { useSession } from '../../../lib/session';
@@ -31,6 +32,7 @@ function LabFileDocument({
 }) {
   const [openProgramKeys, setOpenProgramKeys] = useState<Set<string>>(() => new Set());
   const { course, row } = meta;
+  const generatedAt = formatDateTimeIst(new Date().toISOString());
   const roll = row.student.roll_no ?? '—';
   const verifyId = verificationCode(course.code, row.student.roll_no ?? '', row.student.id);
   const siteBase = (import.meta.env.VITE_SITE_URL || window.location.origin).replace(/\/+$/, '');
@@ -190,27 +192,13 @@ function LabFileDocument({
           </tbody>
         </table>
 
-        <div
-          style={{
-            marginTop: 'auto',
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            gap: 28,
-            fontFamily: 'var(--font-sans)',
-            fontSize: 13,
-          }}
-        >
-          <div style={{ flex: 1, borderTop: '1px solid var(--ink)', paddingTop: 8 }}>
-            Faculty in-charge
-            <br />
-            <span style={{ color: 'var(--muted)', fontSize: 11 }}>signature and date</span>
-          </div>
-          <div style={{ flex: 1, borderTop: '1px solid var(--ink)', paddingTop: 8 }}>
-            Head of Department
-            <br />
-            <span style={{ color: 'var(--muted)', fontSize: 11 }}>signature and date</span>
-          </div>
+        <div style={{ marginTop: 'auto', width: '100%', fontFamily: 'var(--font-sans)' }}>
+          <DigitalReportFooter
+            facultyName={meta.facultyName}
+            timestamp={generatedAt}
+            universityName={meta.institutionName}
+            inlineOnly
+          />
         </div>
       </section>
 
@@ -289,9 +277,13 @@ function LabFileDocument({
           </div>
         </div>
 
-        <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', gap: 28, fontSize: 13 }}>
-          <div style={{ flex: 1, borderTop: '1px solid var(--ink)', paddingTop: 8 }}>Student signature</div>
-          <div style={{ flex: 1, borderTop: '1px solid var(--ink)', paddingTop: 8 }}>Date</div>
+        <div style={{ marginTop: 'auto', width: '100%' }}>
+          <DigitalReportFooter
+            facultyName={meta.facultyName}
+            timestamp={generatedAt}
+            universityName={meta.institutionName}
+            inlineOnly
+          />
         </div>
       </section>
 
@@ -398,6 +390,15 @@ function LabFileDocument({
             </tr>
           </tbody>
         </table>
+
+        <div style={{ marginTop: 'auto', width: '100%' }}>
+          <DigitalReportFooter
+            facultyName={meta.facultyName}
+            timestamp={generatedAt}
+            universityName={meta.institutionName}
+            inlineOnly
+          />
+        </div>
       </section>
 
       {/* Page 4: Record of submitted programs */}
@@ -503,23 +504,11 @@ function LabFileDocument({
           </table>
         </div>
 
-        <div
-          style={{
-            marginTop: 18,
-            paddingTop: 12,
-            borderTop: '1px solid var(--border-soft)',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: 8,
-            fontSize: 11,
-            color: 'var(--muted)',
-          }}
-        >
-          <Wordmark />
-          <span>· verified digital lab record by</span>
-          <Elzeo />
-        </div>
+        <DigitalReportFooter
+          facultyName={meta.facultyName}
+          timestamp={generatedAt}
+          universityName={meta.institutionName}
+        />
       </section>
     </div>
   );

@@ -473,6 +473,36 @@ th {
   border-radius: var(--radius);
 }
 
+.printable-modal {
+  max-width: 920px;
+}
+
+.print-only {
+  display: none;
+}
+
+.print-page-table,
+.print-page-table > tbody,
+.print-page-table > tbody > tr,
+.print-page-table > tbody > tr > td {
+  display: block;
+  width: 100%;
+}
+
+.print-page-table > tfoot {
+  display: none;
+}
+
+.report-footer-inline {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  text-align: center;
+}
+
 .field-label {
   display: flex;
   flex-direction: column;
@@ -688,6 +718,11 @@ th {
   }
 }
 
+@page {
+  size: A4 portrait;
+  margin: 12mm 12mm 16mm 12mm;
+}
+
 @media print {
   .no-print,
   nav,
@@ -695,19 +730,158 @@ th {
     display: none !important;
   }
 
+  .print-only {
+    display: block !important;
+  }
+
   body {
     background: #ffffff;
+    color: #141413;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.print-modal-active #root {
+    display: none !important;
+  }
+
+  .printable-modal-backdrop {
+    position: static !important;
+    inset: auto !important;
+    background: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  .printable-modal {
+    max-width: none !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .printable-modal .card-head {
+    padding: 0 0 8px 0 !important;
+    border-bottom: 1px solid #d6d3c9 !important;
+  }
+
+  .printable-modal .card-head .btn {
+    display: none !important;
+  }
+
+  .printable-modal .card-body {
+    padding: 10px 0 0 0 !important;
+    overflow: visible !important;
+  }
+
+  .printable-report-scroll {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .print-official-header {
+    text-align: center;
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+    border-bottom: 1.5px solid #141413;
+  }
+
+  .print-official-uni {
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #55544f;
+  }
+
+  .print-official-title {
+    font-size: 17px;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+
+  .print-official-sub {
+    font-size: 11.5px;
+    color: #55544f;
+    margin-top: 2px;
+  }
+
+  .print-page-table {
+    display: table !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  .print-page-table > tbody {
+    display: table-row-group !important;
+  }
+
+  .print-page-table > tfoot {
+    display: table-footer-group !important;
+  }
+
+  .print-page-table > tbody > tr,
+  .print-page-table > tfoot > tr {
+    display: table-row !important;
+  }
+
+  .print-page-table > tbody > tr > td,
+  .print-page-table > tfoot > tr > td {
+    display: table-cell !important;
+    border: 0 !important;
+    padding: 0 !important;
+  }
+
+  .print-footer-space {
+    height: 14mm;
+  }
+
+  .report-print-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 6px 4px 0;
+    border-top: 1px solid #d6d3c9;
+    background: #ffffff;
+    font-size: 9.5px;
+    line-height: 1.35;
+    color: #55544f;
+    text-align: center;
+  }
+
+  .printable-report-root table:not(.print-page-table),
+  .lab-file-page table {
+    width: 100%;
+    font-size: 10.5px !important;
+  }
+
+  .printable-report-root th,
+  .printable-report-root td,
+  .lab-file-page th,
+  .lab-file-page td {
+    padding: 5px 6px !important;
+  }
+
+  .printable-report-root tr,
+  .lab-file-page tr,
+  .card {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .lab-file-page {
     border: 0 !important;
     border-radius: 0 !important;
-    padding: 18px 0 !important;
+    padding: 12px 0 18mm !important;
+    min-height: 0 !important;
     page-break-after: always;
     break-after: page;
   }
 
-  .lab-file-page:last-child {
+  .lab-file-page:last-of-type {
     page-break-after: auto;
     break-after: auto;
   }
