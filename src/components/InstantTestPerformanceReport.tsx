@@ -231,7 +231,8 @@ export function InstantTestPerformanceReport({
         {/* 1. Details of Exam */}
         <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <h3 style={{ fontSize: 13.5, fontWeight: 700, margin: 0 }}>1. Details of Exam</h3>
-          <table>
+          <div style={{ overflowX: 'auto' }}>
+            <table>
             <tbody>
               <tr>
                 <td style={{ width: '22%', fontWeight: 600 }}>Course Name &amp; Code</td>
@@ -250,7 +251,8 @@ export function InstantTestPerformanceReport({
                 <td colSpan={3}>{rubricParts.join(' · ')}</td>
               </tr>
             </tbody>
-          </table>
+            </table>
+          </div>
         </section>
 
         {/* 2. Question Paper */}
@@ -261,7 +263,8 @@ export function InstantTestPerformanceReport({
           {questions.length === 0 ? (
             <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No question paper items recorded.</div>
           ) : (
-            <table>
+            <div style={{ overflowX: 'auto' }}>
+              <table>
               <thead>
                 <tr>
                   <th style={{ width: 38 }}>Q#</th>
@@ -291,7 +294,8 @@ export function InstantTestPerformanceReport({
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           )}
         </section>
 
@@ -303,7 +307,8 @@ export function InstantTestPerformanceReport({
               Students: {attempts.length} · Class Mean: {classMeanPct}%
             </span>
           </div>
-          <table>
+          <div style={{ overflowX: 'auto' }}>
+            <table>
             <thead>
               <tr>
                 <th>Roll / PRN</th>
@@ -350,13 +355,15 @@ export function InstantTestPerformanceReport({
                 })
               )}
             </tbody>
-          </table>
+            </table>
+          </div>
         </section>
 
         {/* 4. CO Attainment Report */}
         <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <h3 style={{ fontSize: 13.5, fontWeight: 700, margin: 0 }}>4. CO Attainment Report</h3>
-          <table>
+          <div style={{ overflowX: 'auto' }}>
+            <table>
             <thead>
               <tr>
                 <th>CO</th>
@@ -387,7 +394,8 @@ export function InstantTestPerformanceReport({
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         </section>
 
         {/* 5. Slow Learners & Fast Learners */}
