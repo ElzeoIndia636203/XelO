@@ -35,27 +35,32 @@ async function callGeminiText(
   maxTokens: number,
 ): Promise<{ ok: true; text: string } | { ok: false; status: number; retryAfterMs?: number }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: 'user', parts: [{ text: user }] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        maxOutputTokens: maxTokens,
-      },
-    }),
-  });
-  if (!res.ok) return { ok: false, status: res.status, retryAfterMs: parseRetryAfterMs(res) };
-  const body = (await res.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const text =
-    body.candidates?.[0]?.content?.parts
-      ?.map((p) => p.text ?? '')
-      .join('\n') ?? '';
-  return { ok: true, text };
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: user }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          maxOutputTokens: maxTokens,
+        },
+      }),
+      signal: AbortSignal.timeout(35_000),
+    });
+    if (!res.ok) return { ok: false, status: res.status, retryAfterMs: parseRetryAfterMs(res) };
+    const body = (await res.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    const text =
+      body.candidates?.[0]?.content?.parts
+        ?.map((p) => p.text ?? '')
+        .join('\n') ?? '';
+    return { ok: true, text };
+  } catch {
+    return { ok: false, status: 504 };
+  }
 }
 
 async function callAnthropicText(
@@ -65,30 +70,35 @@ async function callAnthropicText(
   user: string,
   maxTokens: number,
 ): Promise<{ ok: true; text: string } | { ok: false; status: number; retryAfterMs?: number }> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: 'user', content: user }],
-    }),
-  });
-  if (!res.ok) return { ok: false, status: res.status, retryAfterMs: parseRetryAfterMs(res) };
-  const body = (await res.json()) as {
-    content?: Array<{ type: string; text?: string }>;
-  };
-  const text =
-    body.content
-      ?.filter((c) => c.type === 'text' && typeof c.text === 'string')
-      .map((c) => c.text)
-      .join('\n') ?? '';
-  return { ok: true, text };
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        system,
+        messages: [{ role: 'user', content: user }],
+      }),
+      signal: AbortSignal.timeout(35_000),
+    });
+    if (!res.ok) return { ok: false, status: res.status, retryAfterMs: parseRetryAfterMs(res) };
+    const body = (await res.json()) as {
+      content?: Array<{ type: string; text?: string }>;
+    };
+    const text =
+      body.content
+        ?.filter((c) => c.type === 'text' && typeof c.text === 'string')
+        .map((c) => c.text)
+        .join('\n') ?? '';
+    return { ok: true, text };
+  } catch {
+    return { ok: false, status: 504 };
+  }
 }
 
 async function callNvidiaText(
@@ -115,7 +125,7 @@ async function callNvidiaText(
           { role: 'user', content: user },
         ],
       }),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(35_000),
     });
     if (!res.ok) return { ok: false, status: res.status, retryAfterMs: parseRetryAfterMs(res) };
     const body = (await res.json()) as {
@@ -168,7 +178,7 @@ function resolveModelsForProvider(provider: ProviderKind, task?: LlmTaskGroup): 
     return [taskOverride ?? globalOverride ?? 'claude-sonnet-4-20250514'];
   }
 
-  return [taskOverride, globalOverride, 'gemini-3.8-flash', 'gemini-2.5-flash'].filter(
+  return [taskOverride, globalOverride, 'gemini-2.5-flash', 'gemini-2.0-flash'].filter(
     (m, idx, arr): m is string => Boolean(m) && arr.indexOf(m) === idx,
   );
 }

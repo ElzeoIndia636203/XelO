@@ -386,7 +386,7 @@ export function InstantTestStep({
             await new Promise((r) => setTimeout(r, 1200));
           }
           chunkCalls += 1;
-          const chunk = Math.min(5, slotTarget - slotBuilt);
+          const chunk = Math.min(3, slotTarget - slotBuilt);
           setGenProgress(
             `Generating AI questions for Q${slot} (${allBuilt.length}/${bucketTarget} total)…`,
           );
