@@ -1256,8 +1256,7 @@ export function InstantTestStep({
                 {dAtts.length === 0 ? (
                   <Empty title="No active attempts yet" body="Students will appear here as soon as they start the test." />
                 ) : (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table>
+                  <table className="compact-table">
                     <thead>
                       <tr>
                         <th>PRN</th>
@@ -1337,8 +1336,7 @@ export function InstantTestStep({
                         );
                       })}
                     </tbody>
-                    </table>
-                  </div>
+                  </table>
                 )}
 
                 <div>
@@ -2416,58 +2414,57 @@ export function InstantTestStep({
                   )}
 
                   {attempts.length > 0 && (
-                    <div style={{ overflowX: 'auto', marginTop: 10 }}>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>PRN</th>
-                            <th>Name</th>
-                            <th style={{ whiteSpace: 'nowrap' }}>Pre-test</th>
-                            <th style={{ whiteSpace: 'nowrap' }}>Coding</th>
-                            <th style={{ whiteSpace: 'nowrap' }}>Override</th>
-                            <th style={{ whiteSpace: 'nowrap' }}>Viva</th>
-                            <th style={{ whiteSpace: 'nowrap' }}>Total</th>
-                            <th>Status</th>
-                            <th style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Action</th>
+                    <table className="compact-table" style={{ marginTop: 10 }}>
+                      <thead>
+                        <tr>
+                          <th>PRN</th>
+                          <th>Name</th>
+                          <th>Pre</th>
+                          <th>Code</th>
+                          <th>Override</th>
+                          <th>Viva</th>
+                          <th>Total</th>
+                          <th>Status</th>
+                          <th style={{ textAlign: 'right' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {attempts.map((a) => (
+                          <tr key={a.id}>
+                            <td className="mono" style={{ fontSize: 11.5 }}>{a.prn}</td>
+                            <td>{a.student_name}</td>
+                            <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.pretest_score}/{t.pretest_marks}</td>
+                            <td className="mono">{a.coding_score}</td>
+                            <td className="mono">{a.coding_override_score ?? '—'}</td>
+                            <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.viva_score}/{t.viva_marks}</td>
+                            <td className="mono" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                              {a.final_score}/{t.total_marks}
+                            </td>
+                            <td>
+                              <Chip tone={a.marks_approved ? 'good' : a.code_approved ? 'neutral' : 'warn'}>
+                                {a.marks_approved ? 'Approved' : a.code_approved ? 'Code ok' : 'Pending'}
+                              </Chip>
+                            </td>
+                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              <button
+                                type="button"
+                                className="btn field-sm"
+                                style={{ padding: '4px 8px', fontSize: 11.5 }}
+                                onClick={() => {
+                                  setInspectCtx({ test: t, attempt: a });
+                                  setGradeApprove(a.code_approved || true);
+                                  setGradeOverride(a.coding_override_score !== null ? String(a.coding_override_score) : '');
+                                  setGradeReason(a.override_reason ?? '');
+                                  setGradeViva(String(a.viva_score ?? 0));
+                                }}
+                              >
+                                Code inspect
+                              </button>
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {attempts.map((a) => (
-                            <tr key={a.id}>
-                              <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.prn}</td>
-                              <td>{a.student_name}</td>
-                              <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.pretest_score} / {t.pretest_marks}</td>
-                              <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.coding_score}</td>
-                              <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.coding_override_score ?? '—'}</td>
-                              <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.viva_score} / {t.viva_marks}</td>
-                              <td className="mono" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
-                                {a.final_score} / {t.total_marks}
-                              </td>
-                              <td style={{ whiteSpace: 'nowrap' }}>
-                                <Chip tone={a.marks_approved ? 'good' : a.code_approved ? 'neutral' : 'warn'}>
-                                  {a.marks_approved ? 'Approved' : a.code_approved ? 'Code ok' : 'Pending'}
-                                </Chip>
-                              </td>
-                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                                <button
-                                  type="button"
-                                  className="btn field-sm"
-                                  onClick={() => {
-                                    setInspectCtx({ test: t, attempt: a });
-                                    setGradeApprove(a.code_approved || true);
-                                    setGradeOverride(a.coding_override_score !== null ? String(a.coding_override_score) : '');
-                                    setGradeReason(a.override_reason ?? '');
-                                    setGradeViva(String(a.viva_score ?? 0));
-                                  }}
-                                >
-                                  Code inspect
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </div>
               );
