@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Banner, Card, Chip, Empty } from '../../../components/ui';
+import { Banner, Card, Chip, Empty, Modal } from '../../../components/ui';
 import { errorMessage } from '../../../lib/errors';
 import {
   orderRosterRows,
@@ -99,7 +99,23 @@ export function BatchesStep({
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkTargetBatchId, setBulkTargetBatchId] = useState('');
+  const [newBatchName, setNewBatchName] = useState('');
+  const [newBatchSlot, setNewBatchSlot] = useState('');
+  const [newBatchRoom, setNewBatchRoom] = useState('');
+  const [newBatchStaff, setNewBatchStaff] = useState('');
+  const [moveModalBatchId, setMoveModalBatchId] = useState<string | null>(null);
+  const [moveModalSearch, setMoveModalSearch] = useState('');
+  const [moveModalKeys, setMoveModalKeys] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+
+  const suggestedBatchName = (() => {
+    const existing = new Set(batches.map((b) => b.name.trim().toLowerCase()));
+    for (let i = 0; i < 26; i++) {
+      const candidate = `Batch ${String.fromCharCode(65 + i)}`;
+      if (!existing.has(candidate.toLowerCase())) return candidate;
+    }
+    return `Batch ${batches.length + 1}`;
+  })();
 
   const profileMap = new Map(studentProfiles.map((p) => [p.id, p]));
   const totalStudents = enrollments.length + pendingEnrollments.length;
@@ -401,6 +417,59 @@ export function BatchesStep({
     }
   }
 
+  async function createEmptyBatch(e: React.FormEvent) {
+    e.preventDefault();
+    const name = (newBatchName.trim() || suggestedBatchName).trim();
+    if (!name) {
+      onNotify('Enter a batch name.', false);
+      return;
+    }
+    setBusy(true);
+    try {
+      const created = await rpc<Batch>('create_course_batch', {
+        p_course_id: course.id,
+        p_name: name,
+        p_slot: newBatchSlot.trim(),
+        p_room: newBatchRoom.trim(),
+        p_staff: newBatchStaff.trim(),
+      });
+      setNewBatchName('');
+      setNewBatchSlot('');
+      setNewBatchRoom('');
+      setNewBatchStaff('');
+      onNotify(`Created empty batch ${created.name} (code ${created.class_code}).`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveModalStudents() {
+    if (!moveModalBatchId || moveModalKeys.length === 0) return;
+    const { enrollmentIds, pendingIds } = splitSelectedIds(moveModalKeys);
+    setBusy(true);
+    try {
+      const moved = await rpc<number>('move_students_bulk', {
+        p_course_id: course.id,
+        p_enrollment_ids: enrollmentIds,
+        p_pending_ids: pendingIds,
+        p_to_batch_id: moveModalBatchId,
+      });
+      const targetName = batches.find((b) => b.id === moveModalBatchId)?.name ?? 'batch';
+      setMoveModalBatchId(null);
+      setMoveModalKeys([]);
+      setMoveModalSearch('');
+      onNotify(`Moved ${moved} student(s) to ${targetName}.`, true);
+      onRefresh();
+    } catch (err) {
+      onNotify(errorMessage(err), false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const effectiveMaxPerBatch = Math.min(65, Math.max(1, Number.isFinite(maxPerBatch) ? maxPerBatch : 65));
   const previewSplit = splitRosterEvenly(parsedRows, effectiveMaxPerBatch);
 
@@ -678,6 +747,57 @@ export function BatchesStep({
         </div>
       </Card>
 
+      <Card title="Create empty batch">
+        <form onSubmit={(e) => void createEmptyBatch(e)} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+          <label className="field-label">
+            Batch name
+            <input
+              className="field"
+              value={newBatchName}
+              onChange={(e) => setNewBatchName(e.target.value)}
+              placeholder={suggestedBatchName}
+              style={{ width: 160 }}
+            />
+          </label>
+          <label className="field-label">
+            Slot (optional)
+            <input
+              className="field"
+              value={newBatchSlot}
+              onChange={(e) => setNewBatchSlot(e.target.value)}
+              placeholder="Wed 10:00-12:00"
+              style={{ width: 170 }}
+            />
+          </label>
+          <label className="field-label">
+            Room (optional)
+            <input
+              className="field"
+              value={newBatchRoom}
+              onChange={(e) => setNewBatchRoom(e.target.value)}
+              placeholder="Lab 3"
+              style={{ width: 120 }}
+            />
+          </label>
+          <label className="field-label">
+            Lab staff (optional)
+            <input
+              className="field"
+              value={newBatchStaff}
+              onChange={(e) => setNewBatchStaff(e.target.value)}
+              placeholder="TA 1"
+              style={{ width: 150 }}
+            />
+          </label>
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            Create empty batch
+          </button>
+        </form>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+          Creates an empty batch with its own class code. You can then move students into it from existing batches or invite students directly.
+        </div>
+      </Card>
+
       {batches.length === 0 ? (
         <Empty
           title="No batches yet"
@@ -793,8 +913,22 @@ export function BatchesStep({
                   : `${b.name} · ${allMembers.length} students`
               }
               actions={
-                <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <Chip tone="neutral">Code: {b.class_code}</Chip>
+                  {batches.length > 1 ? (
+                    <button
+                      type="button"
+                      className="btn field-sm"
+                      disabled={hasConductedSession || busy}
+                      onClick={() => {
+                        setMoveModalBatchId(b.id);
+                        setMoveModalKeys([]);
+                        setMoveModalSearch('');
+                      }}
+                    >
+                      Add from existing batch
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="btn field-sm"
@@ -936,13 +1070,189 @@ export function BatchesStep({
                   </div>
                 ) : q ? (
                   <p style={{ fontSize: 13, color: 'var(--muted)' }}>No matching students in this batch.</p>
-                ) : null}
+                ) : (
+                  <p style={{ fontSize: 13, color: 'var(--muted)' }}>
+                    No students in this batch yet.
+                    {batches.length > 1 && !hasConductedSession
+                      ? ' Click "Add from existing batch" above or use the batch dropdown on any student row to move them here.'
+                      : ''}
+                  </p>
+                )}
               </div>
             </Card>
           );
         })}
         </>
       )}
+
+      {moveModalBatchId ? (() => {
+        const targetBatch = batches.find((b) => b.id === moveModalBatchId);
+        if (!targetBatch) return null;
+        const batchNameById = new Map(batches.map((b) => [b.id, b.name]));
+        const otherEnrolled = enrollments
+          .filter((e) => e.batch_id !== targetBatch.id)
+          .map((e) => {
+            const p = profileMap.get(e.student_id);
+            return {
+              key: `enr:${e.id}`,
+              roll: p?.roll_no ?? '—',
+              name: p?.full_name ?? 'Student',
+              email: p?.email ?? '',
+              fromBatch: batchNameById.get(e.batch_id) ?? '—',
+              joined: true,
+            };
+          });
+        const otherPending = pendingEnrollments
+          .filter((pe) => pe.batch_id !== targetBatch.id)
+          .map((pe) => ({
+            key: `pend:${pe.id}`,
+            roll: pe.roll_no,
+            name: pe.full_name,
+            email: pe.email,
+            fromBatch: batchNameById.get(pe.batch_id) ?? '—',
+            joined: false,
+          }));
+        const allOther = [...otherEnrolled, ...otherPending].sort((a, x) =>
+          a.roll.localeCompare(x.roll),
+        );
+        const mq = moveModalSearch.trim().toLowerCase();
+        const filteredOther = mq
+          ? allOther.filter(
+              (m) =>
+                m.roll.toLowerCase().includes(mq) ||
+                m.name.toLowerCase().includes(mq) ||
+                m.email.toLowerCase().includes(mq) ||
+                m.fromBatch.toLowerCase().includes(mq),
+            )
+          : allOther;
+        const allFilteredSelected =
+          filteredOther.length > 0 && filteredOther.every((m) => moveModalKeys.includes(m.key));
+
+        return (
+          <Modal
+            open
+            title={`Add students to ${targetBatch.name}`}
+            onClose={() => {
+              setMoveModalBatchId(null);
+              setMoveModalKeys([]);
+              setMoveModalSearch('');
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '72vh' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  type="search"
+                  className="field"
+                  value={moveModalSearch}
+                  onChange={(e) => setMoveModalSearch(e.target.value)}
+                  placeholder="Search by roll no, name, email, or current batch…"
+                  style={{ flex: '1 1 240px' }}
+                />
+                <Chip tone="neutral">{moveModalKeys.length} selected</Chip>
+              </div>
+
+              {filteredOther.length === 0 ? (
+                <div style={{ fontSize: 13, color: 'var(--muted)', padding: '12px 0' }}>
+                  {allOther.length === 0
+                    ? 'No students in other batches to move.'
+                    : 'No matching students found.'}
+                </div>
+              ) : (
+                <div style={{ overflowY: 'auto', maxHeight: '48vh', border: '1px solid var(--border)', borderRadius: 6 }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{ width: 32 }}>
+                          <input
+                            type="checkbox"
+                            aria-label="Select all matching students"
+                            checked={allFilteredSelected}
+                            onChange={() => {
+                              const keys = filteredOther.map((m) => m.key);
+                              setMoveModalKeys((prev) => {
+                                if (allFilteredSelected) {
+                                  return prev.filter((k) => !keys.includes(k));
+                                }
+                                const next = new Set(prev);
+                                for (const k of keys) next.add(k);
+                                return Array.from(next);
+                              });
+                            }}
+                          />
+                        </th>
+                        <th>Roll</th>
+                        <th>Name</th>
+                        <th>Current batch</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredOther.map((m) => (
+                        <tr key={m.key}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${m.email || m.name}`}
+                              checked={moveModalKeys.includes(m.key)}
+                              onChange={() =>
+                                setMoveModalKeys((prev) =>
+                                  prev.includes(m.key)
+                                    ? prev.filter((k) => k !== m.key)
+                                    : [...prev, m.key],
+                                )
+                              }
+                            />
+                          </td>
+                          <td className="mono">{m.roll}</td>
+                          <td>
+                            <div>{m.name}</div>
+                            <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
+                              {m.email}
+                            </div>
+                          </td>
+                          <td>
+                            <Chip tone="neutral">{m.fromBatch}</Chip>
+                          </td>
+                          <td>
+                            <Chip tone={m.joined ? 'good' : 'warn'}>
+                              {m.joined ? 'Joined' : 'Invited'}
+                            </Chip>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn field-sm"
+                  disabled={busy}
+                  onClick={() => {
+                    setMoveModalBatchId(null);
+                    setMoveModalKeys([]);
+                    setMoveModalSearch('');
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary field-sm"
+                  disabled={busy || moveModalKeys.length === 0}
+                  onClick={() => void moveModalStudents()}
+                >
+                  {busy
+                    ? 'Moving…'
+                    : `Move ${moveModalKeys.length} student${moveModalKeys.length === 1 ? '' : 's'} to ${targetBatch.name}`}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })() : null}
     </div>
   );
 }

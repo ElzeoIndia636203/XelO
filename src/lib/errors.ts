@@ -30,6 +30,7 @@ const MESSAGES: Record<string, string> = {
   not_editable: 'This item cannot be edited in its current state.',
   cannot_approve_own: 'You cannot approve your own course plan.',
   empty_roster: 'The uploaded roster contains no students.',
+  batch_name_exists: 'A batch with this name already exists in this course.',
   sessions_already_conducted: 'Students cannot be moved after a session has been conducted.',
   sessions_already_active: 'The session plan cannot be replaced once sessions are active.',
   invalid_class_code: 'That class code was not found.',
