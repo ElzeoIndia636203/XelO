@@ -221,6 +221,8 @@ export function InstantTestStep({
   const [gradeViva, setGradeViva] = useState('0');
   const [reportTest, setReportTest] = useState<InstantTestRow | null>(null);
   const [liveInspectAttemptId, setLiveInspectAttemptId] = useState<string | null>(null);
+  const [liveInsightEvents, setLiveInsightEvents] = useState<InstantProctorEventRow[]>([]);
+  const [liveInsightLoading, setLiveInsightLoading] = useState(false);
 
   const selectedCo = outcomes.find((o) => o.id === coId) ?? outcomes[0] ?? null;
   const getSlotCo = (slot: number) => {
@@ -1051,6 +1053,34 @@ export function InstantTestStep({
       if (timer !== null) window.clearInterval(timer);
     };
   }, [viewMode, selectedTest, attemptsByTest, reloadAll]);
+
+  // Fetch proctor events for the specific attempt open in Live Insights modal.
+  // Refreshes every 10 s while the modal is open (live tests only).
+  useEffect(() => {
+    if (!liveInspectAttemptId) {
+      return;
+    }
+    let alive = true;
+    const pull = async () => {
+      setLiveInsightLoading(true);
+      const { data } = await supabase
+        .from('proctor_events')
+        .select('id, instant_attempt_id, rule_id, level, detail, duration_sec, at')
+        .eq('instant_attempt_id', liveInspectAttemptId)
+        .order('at', { ascending: false })
+        .limit(200);
+      if (alive) {
+        setLiveInsightEvents((data as InstantProctorEventRow[]) ?? []);
+        setLiveInsightLoading(false);
+      }
+    };
+    void pull();
+    const interval = window.setInterval(() => void pull(), 10_000);
+    return () => {
+      alive = false;
+      window.clearInterval(interval);
+    };
+  }, [liveInspectAttemptId]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -2591,14 +2621,29 @@ export function InstantTestStep({
       {liveInspectAttemptId && selectedTest ? (() => {
         const liveAtt = (attemptsByTest[selectedTest.id] ?? []).find((x) => x.id === liveInspectAttemptId) ?? null;
         if (!liveAtt) return null;
-        const studentEvents = proctorEvents.filter((ev) => ev.instant_attempt_id === liveAtt.id);
+        const breaches = liveInsightEvents.filter((ev) => ev.level === 'S1' || ev.level === 'S2' || ev.level === 'S3');
         const ansEntries = Object.entries(liveAtt.answers ?? {});
         const resets = liveAtt.reset_count ?? 0;
+        const refreshLiveInsights = async () => {
+          void fetchTests();
+          setLiveInsightLoading(true);
+          const { data } = await supabase
+            .from('proctor_events')
+            .select('id, instant_attempt_id, rule_id, level, detail, duration_sec, at')
+            .eq('instant_attempt_id', liveAtt.id)
+            .order('at', { ascending: false })
+            .limit(200);
+          setLiveInsightEvents((data as InstantProctorEventRow[]) ?? []);
+          setLiveInsightLoading(false);
+        };
         return (
           <Modal
             open
             title={`Live insights · ${liveAtt.student_name} (${liveAtt.prn})`}
-            onClose={() => setLiveInspectAttemptId(null)}
+            onClose={() => {
+              setLiveInspectAttemptId(null);
+              setLiveInsightEvents([]);
+            }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '76vh', overflowY: 'auto' }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -2611,16 +2656,22 @@ export function InstantTestStep({
                         ? 'Submitted'
                         : 'Live'}
                 </Chip>
-                <Chip tone={(liveAtt.warning_count ?? 0) > 0 ? 'warn' : 'good'}>
+                <Chip tone={(liveAtt.warning_count ?? 0) > 0 || breaches.length > 0 ? 'warn' : 'good'}>
                   Breaches: {liveAtt.warning_count ?? 0}/2
                 </Chip>
                 <Chip tone="neutral">Integrity: {Math.round(liveAtt.integrity_score ?? 100)}/100</Chip>
                 <Chip tone="neutral">Resets: {resets}/2</Chip>
                 <Chip tone="neutral">Coding score: {liveAtt.coding_score}/{selectedTest.total_marks}</Chip>
-                <button type="button" className="btn field-sm" onClick={() => void fetchTests()}>
-                  Refresh
+                <button type="button" className="btn field-sm" disabled={liveInsightLoading} onClick={() => void refreshLiveInsights()}>
+                  {liveInsightLoading ? 'Refreshing…' : 'Refresh'}
                 </button>
               </div>
+
+              {breaches.length > 0 ? (
+                <Banner tone="err">
+                  {breaches.length} proctor breach{breaches.length === 1 ? '' : 'es'} detected ({breaches.map((b) => b.rule_id).join(', ')}).
+                </Banner>
+              ) : null}
 
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
@@ -2676,9 +2727,11 @@ export function InstantTestStep({
 
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                  Student proctor log & breaches ({studentEvents.length})
+                  Student proctor log & breaches ({liveInsightEvents.length})
                 </div>
-                {studentEvents.length === 0 ? (
+                {liveInsightLoading && liveInsightEvents.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading proctor events…</div>
+                ) : liveInsightEvents.length === 0 ? (
                   <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No proctor events logged for this student.</div>
                 ) : (
                   <table>
@@ -2691,7 +2744,7 @@ export function InstantTestStep({
                       </tr>
                     </thead>
                     <tbody>
-                      {studentEvents.map((ev) => (
+                      {liveInsightEvents.map((ev) => (
                         <tr key={ev.id}>
                           <td className="mono">{formatDateTimeIst(ev.at)}</td>
                           <td className="mono">{ev.rule_id}</td>

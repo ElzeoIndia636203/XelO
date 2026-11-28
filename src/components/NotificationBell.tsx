@@ -199,8 +199,8 @@ export function NotificationBell({ variant = 'light' }: { variant?: 'dark' | 'li
             position: 'absolute',
             right: 0,
             top: 40,
-            width: 320,
-            maxHeight: 400,
+            width: 360,
+            maxHeight: 480,
             overflowY: 'auto',
             background: '#FFFFFF',
             color: '#141413',
@@ -214,8 +214,13 @@ export function NotificationBell({ variant = 'light' }: { variant?: 'dark' | 'li
             gap: 8,
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
-            <strong style={{ fontSize: 13, color: '#141413' }}>Notifications</strong>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <strong style={{ fontSize: 13, color: '#141413' }}>
+              Notifications
+              {notifications.length > 0 && (
+                <span style={{ fontWeight: 400, color: '#6B6A63', marginLeft: 4 }}>· {notifications.length}</span>
+              )}
+            </strong>
             <div style={{ display: 'flex', gap: 4 }}>
               <button
                 type="button"
@@ -257,7 +262,7 @@ export function NotificationBell({ variant = 'light' }: { variant?: 'dark' | 'li
           {notifications.length === 0 ? (
             <div style={{ fontSize: 12, color: '#6B6A63', padding: '8px 0' }}>No notifications yet.</div>
           ) : (
-            notifications.slice(0, 12).map((n) => {
+            notifications.map((n) => {
               const hasDest = Boolean(normalizeAppRoute(n.link));
               return (
                 <div
@@ -312,6 +317,11 @@ export function NotificationBell({ variant = 'light' }: { variant?: 'dark' | 'li
                 </div>
               );
             })
+          )}
+          {notifications.length > 10 && (
+            <div style={{ fontSize: 10.5, color: '#8F8D85', textAlign: 'center', paddingTop: 4, flexShrink: 0 }}>
+              Showing all {notifications.length} notifications · Scroll to see more
+            </div>
           )}
         </div>
       ) : null}

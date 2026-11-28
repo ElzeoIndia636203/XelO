@@ -31,6 +31,8 @@ interface InstantAttemptPayload {
   prn: string;
   student_name: string;
   submitted_at: string | null;
+  cheating_marked?: boolean;
+  ended_reason?: string | null;
   total_score: number;
   pretest_count?: number;
   pretest_marks?: number;
@@ -93,6 +95,9 @@ export function StudentInstantTestPage() {
   const [disclaimerBreach, setDisclaimerBreach] = useState<{ ruleId: string; msg: string } | null>(null);
   const [consentChecked, setConsentChecked] = useState(false);
 
+  const [cheatingTerminated, setCheatingTerminated] = useState(false);
+  const [terminationReason, setTerminationReason] = useState('');
+
   const loadAttempt = useCallback(async () => {
     if (!attemptId) return;
     const { data, error } = await supabase.rpc('student_get_instant_attempt', {
@@ -105,6 +110,14 @@ export function StudentInstantTestPage() {
     }
     const p = data as InstantAttemptPayload;
     setPayload(p);
+    // If faculty already terminated for cheating before the page loaded, show immediately
+    if (p.cheating_marked) {
+      stopProctorStreams();
+      setTerminationReason(p.ended_reason ?? 'Terminated by faculty for misconduct.');
+      setCheatingTerminated(true);
+      setLoading(false);
+      return;
+    }
     const { data: tCfg } = await supabase
       .from('instant_tests')
       .select('proctor_config')
@@ -160,6 +173,35 @@ export function StudentInstantTestPage() {
     }, 0);
     return () => clearTimeout(t);
   }, [loadAttempt]);
+
+  // Realtime: watch for faculty terminating this attempt for cheating.
+  // The DB sets cheating_marked=true and submitted_at on the attempt row.
+  useEffect(() => {
+    if (!attemptId) return;
+    const channel = supabase
+      .channel(`attempt-cheat-watch-${attemptId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'instant_test_attempts',
+          filter: `id=eq.${attemptId}`,
+        },
+        (payload) => {
+          const row = payload.new as { cheating_marked?: boolean; ended_reason?: string };
+          if (row.cheating_marked) {
+            stopProctorStreams();
+            setTerminationReason(row.ended_reason ?? 'Terminated by faculty for misconduct.');
+            setCheatingTerminated(true);
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [attemptId]);
 
   const activeQuestionObj = payload?.questions[activeIdx] ?? null;
   const qDurationSec = (() => {
@@ -322,6 +364,82 @@ export function StudentInstantTestPage() {
             </button>
           </div>
         </Card>
+      </main>
+    );
+  }
+
+  // Faculty-terminated for cheating — full-screen takeover, score = 0
+  if (cheatingTerminated) {
+    return (
+      <main
+        style={{
+          position: 'fixed',
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#0B1120',
+          color: '#F8FAFC',
+          padding: 24,
+          zIndex: 9999,
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 520,
+            width: '100%',
+            background: '#1E293B',
+            borderRadius: 10,
+            padding: 32,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+            border: '1px solid #DC2626',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span
+              aria-hidden="true"
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                background: '#DC2626',
+                flexShrink: 0,
+              }}
+            />
+            <h1 style={{ fontSize: 18, fontWeight: 700, color: '#FCA5A5', margin: 0 }}>
+              Assessment terminated
+            </h1>
+          </div>
+          <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0, color: '#CBD5E1' }}>
+            {terminationReason || 'Your test has been terminated by your faculty for misconduct.'}
+          </p>
+          <div
+            style={{
+              padding: '12px 16px',
+              background: '#450A0A',
+              border: '1px solid #991B1B',
+              borderRadius: 6,
+              fontSize: 13,
+              color: '#FCA5A5',
+              fontWeight: 600,
+            }}
+          >
+            Your score for this test has been recorded as 0.
+          </div>
+          <p style={{ fontSize: 12.5, color: '#94A3B8', margin: 0 }}>
+            All work has been saved. Contact your faculty if you believe this was in error.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => navigate('/student')}
+            style={{ alignSelf: 'flex-start', marginTop: 4 }}
+          >
+            Return to home
+          </button>
+        </div>
       </main>
     );
   }
