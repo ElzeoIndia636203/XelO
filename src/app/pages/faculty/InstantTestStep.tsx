@@ -1354,16 +1354,16 @@ export function InstantTestStep({
                     <tbody>
                       {dAtts.map((a) => {
                         const stateLabel = a.cheating_marked
-                          ? 'Terminated (Cheating)'
+                          ? 'Cheating'
                           : a.auto_submitted_breach
-                            ? 'Auto-submitted (2nd breach)'
+                            ? '2nd breach'
                             : a.submitted_at
                               ? 'Submitted'
                               : 'Live';
                         const resets = a.reset_count ?? 0;
                         return (
                           <tr key={a.id}>
-                            <td className="mono">{a.prn}</td>
+                            <td className="mono" style={{ fontSize: 11.5 }}>{a.prn}</td>
                             <td>
                               <button
                                 type="button"
@@ -1377,43 +1377,50 @@ export function InstantTestStep({
                                   cursor: 'pointer',
                                   textDecoration: 'underline',
                                   textAlign: 'left',
+                                  fontSize: 12,
                                 }}
                               >
                                 {a.student_name}
                               </button>
                             </td>
-                            <td>
+                            <td style={{ whiteSpace: 'nowrap' }}>
                               <Chip tone={a.cheating_marked || a.auto_submitted_breach ? 'bad' : a.submitted_at ? 'good' : 'warn'}>
                                 {stateLabel}
                               </Chip>
                             </td>
-                            <td className="mono">{a.warning_count ?? 0}/2</td>
-                            <td className="mono">{Math.round(a.integrity_score ?? 100)}/100</td>
-                            <td className="mono">{resets}/2</td>
-                            <td style={{ textAlign: 'right', display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
-                              <button
-                                type="button"
-                                className="btn field-sm"
-                                onClick={() => setLiveInspectAttemptId(a.id)}
-                              >
-                                Live insights
-                              </button>
-                              <button
-                                type="button"
-                                className="btn field-sm"
-                                disabled={busy || resets >= 2 || Boolean(a.cheating_marked)}
-                                onClick={() => void resetAttempt(a.id, a.prn)}
-                              >
-                                Reset ({resets}/2)
-                              </button>
-                              <button
-                                type="button"
-                                className="btn field-sm"
-                                disabled={busy || Boolean(a.cheating_marked)}
-                                onClick={() => void markCheatingAndTerminate(a.id, a.prn)}
-                              >
-                                Mark cheating & terminate
-                              </button>
+                            <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.warning_count ?? 0}/2</td>
+                            <td className="mono" style={{ whiteSpace: 'nowrap' }}>{Math.round(a.integrity_score ?? 100)}/100</td>
+                            <td className="mono" style={{ whiteSpace: 'nowrap' }}>{resets}/2</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  className="btn field-sm"
+                                  style={{ padding: '3px 7px', fontSize: 11, height: 'auto', minHeight: 26, whiteSpace: 'nowrap' }}
+                                  onClick={() => setLiveInspectAttemptId(a.id)}
+                                >
+                                  Insights
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn field-sm"
+                                  style={{ padding: '3px 7px', fontSize: 11, height: 'auto', minHeight: 26, whiteSpace: 'nowrap' }}
+                                  disabled={busy || resets >= 2 || Boolean(a.cheating_marked)}
+                                  onClick={() => void resetAttempt(a.id, a.prn)}
+                                >
+                                  Reset ({resets}/2)
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn field-sm"
+                                  title="Mark cheating & terminate"
+                                  style={{ padding: '3px 7px', fontSize: 11, height: 'auto', minHeight: 26, whiteSpace: 'nowrap' }}
+                                  disabled={busy || Boolean(a.cheating_marked)}
+                                  onClick={() => void markCheatingAndTerminate(a.id, a.prn)}
+                                >
+                                  Mark cheating
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
