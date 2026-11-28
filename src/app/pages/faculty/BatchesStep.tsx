@@ -97,6 +97,7 @@ export function BatchesStep({
     }
   }
   const [studentSearch, setStudentSearch] = useState('');
+  const [batchSearches, setBatchSearches] = useState<Record<string, string>>({});
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [bulkTargetBatchId, setBulkTargetBatchId] = useState('');
   const [newBatchName, setNewBatchName] = useState('');
@@ -895,20 +896,27 @@ export function BatchesStep({
             a.roll.localeCompare(x.roll),
           );
           const q = studentSearch.trim().toLowerCase();
-          const members = q
-            ? allMembers.filter(
-                (m) =>
-                  m.roll.toLowerCase().includes(q) ||
-                  m.name.toLowerCase().includes(q) ||
-                  m.email.toLowerCase().includes(q),
-              )
-            : allMembers;
+          const bq = (batchSearches[b.id] ?? '').trim().toLowerCase();
+          const hasFilter = Boolean(q || bq);
+          const members = allMembers.filter((m) => {
+            const matchesGlobal =
+              !q ||
+              m.roll.toLowerCase().includes(q) ||
+              m.name.toLowerCase().includes(q) ||
+              m.email.toLowerCase().includes(q);
+            const matchesBatch =
+              !bq ||
+              m.roll.toLowerCase().includes(bq) ||
+              m.name.toLowerCase().includes(bq) ||
+              m.email.toLowerCase().includes(bq);
+            return matchesGlobal && matchesBatch;
+          });
 
           return (
             <Card
               key={b.id}
               title={
-                q
+                hasFilter
                   ? `${b.name} · ${members.length} of ${allMembers.length} students`
                   : `${b.name} · ${allMembers.length} students`
               }
@@ -994,81 +1002,107 @@ export function BatchesStep({
                   </button>
                 </div>
 
+                {allMembers.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="search"
+                      aria-label={`Search students in ${b.name}`}
+                      className="field field-sm"
+                      value={batchSearches[b.id] ?? ''}
+                      onChange={(e) =>
+                        setBatchSearches((prev) => ({ ...prev, [b.id]: e.target.value }))
+                      }
+                      placeholder={`Search in ${b.name} by roll no, name, or email…`}
+                      style={{ width: 300, maxWidth: '100%' }}
+                    />
+                    {bq ? (
+                      <button
+                        type="button"
+                        className="btn field-sm"
+                        onClick={() =>
+                          setBatchSearches((prev) => ({ ...prev, [b.id]: '' }))
+                        }
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {members.length > 0 ? (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th style={{ width: 32 }}>
+                  <table className="compact-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 28 }}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select all in ${b.name}`}
+                            disabled={hasConductedSession || busy}
+                            checked={
+                              members.length > 0 &&
+                              members.every((m) => selectedKeys.includes(m.key))
+                            }
+                            onChange={() =>
+                              toggleSelectBatch(members.map((m) => m.key))
+                            }
+                          />
+                        </th>
+                        <th>Roll</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Status</th>
+                        {batches.length > 1 ? <th style={{ textAlign: 'right' }}>Batch</th> : null}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {members.map((m) => (
+                        <tr key={m.key}>
+                          <td>
                             <input
                               type="checkbox"
-                              aria-label={`Select all in ${b.name}`}
+                              aria-label={`Select ${m.email || m.name}`}
                               disabled={hasConductedSession || busy}
-                              checked={
-                                members.length > 0 &&
-                                members.every((m) => selectedKeys.includes(m.key))
-                              }
-                              onChange={() =>
-                                toggleSelectBatch(members.map((m) => m.key))
-                              }
+                              checked={selectedKeys.includes(m.key)}
+                              onChange={() => toggleSelectKey(m.key)}
                             />
-                          </th>
-                          <th>Roll</th>
-                          <th>Name</th>
-                          <th>Email</th>
-                          <th>Status</th>
-                          {batches.length > 1 ? <th style={{ textAlign: 'right' }}>Batch</th> : null}
+                          </td>
+                          <td className="mono" style={{ fontSize: 11.5 }}>{m.roll}</td>
+                          <td>{m.name}</td>
+                          <td className="mono" style={{ fontSize: 11.5, wordBreak: 'break-word' }}>
+                            {m.email}
+                          </td>
+                          <td>
+                            <Chip tone={m.joined ? 'good' : 'warn'}>
+                              {m.joined ? 'Joined' : 'Invited'}
+                            </Chip>
+                          </td>
+                          {batches.length > 1 ? (
+                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              <select
+                                aria-label={`Move ${m.email || m.name} to batch`}
+                                className="field field-sm"
+                                style={{ padding: '0 6px', height: 30, fontSize: 12 }}
+                                disabled={hasConductedSession || busy || !m.email}
+                                value={b.id}
+                                onChange={(e) => {
+                                  if (e.target.value !== b.id) {
+                                    void moveStudent(m.email, e.target.value);
+                                  }
+                                }}
+                              >
+                                {batches.map((target) => (
+                                  <option key={target.id} value={target.id}>
+                                    {target.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          ) : null}
                         </tr>
-                      </thead>
-                      <tbody>
-                        {members.map((m) => (
-                          <tr key={m.key}>
-                            <td>
-                              <input
-                                type="checkbox"
-                                aria-label={`Select ${m.email || m.name}`}
-                                disabled={hasConductedSession || busy}
-                                checked={selectedKeys.includes(m.key)}
-                                onChange={() => toggleSelectKey(m.key)}
-                              />
-                            </td>
-                            <td className="mono">{m.roll}</td>
-                            <td>{m.name}</td>
-                            <td className="mono" style={{ fontSize: 12 }}>
-                              {m.email}
-                            </td>
-                            <td>
-                              <Chip tone={m.joined ? 'good' : 'warn'}>
-                                {m.joined ? 'Joined' : 'Invited'}
-                              </Chip>
-                            </td>
-                            {batches.length > 1 ? (
-                              <td style={{ textAlign: 'right' }}>
-                                <select
-                                  aria-label={`Move ${m.email || m.name} to batch`}
-                                  className="field field-sm"
-                                  disabled={hasConductedSession || busy || !m.email}
-                                  value={b.id}
-                                  onChange={(e) => {
-                                    if (e.target.value !== b.id) {
-                                      void moveStudent(m.email, e.target.value);
-                                    }
-                                  }}
-                                >
-                                  {batches.map((target) => (
-                                    <option key={target.id} value={target.id}>
-                                      {target.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
-                            ) : null}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : q ? (
+                      ))}
+                    </tbody>
+                  </table>
+                ) : hasFilter ? (
                   <p style={{ fontSize: 13, color: 'var(--muted)' }}>No matching students in this batch.</p>
                 ) : (
                   <p style={{ fontSize: 13, color: 'var(--muted)' }}>
