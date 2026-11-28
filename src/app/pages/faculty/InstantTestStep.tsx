@@ -1209,21 +1209,104 @@ export function InstantTestStep({
           .filter((a) => dParts.length === 0 || dApprovedIds.has(a.student_id))
           .slice()
           .sort((a, b) => a.prn.localeCompare(b.prn));
+        const dPendingRequests = dParts.filter((p) => p.approval_status === 'pending');
         const attMap = new Map(dAtts.map((a) => [a.id, a]));
         return (
           <Card
             title={`${selectedTest.topic} (${selectedTest.test_code})`}
             actions={
-              <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="btn field-sm" onClick={() => setViewMode('dashboard')}>
-                  ← Back to dashboard
-                </button>
+              <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Chip tone={selectedTest.status === 'active' ? 'good' : selectedTest.status === 'scheduled' ? 'warn' : 'neutral'}>
+                  {selectedTest.status}
+                </Chip>
+                {selectedTest.status !== 'finalized' && (
+                  <button
+                    type="button"
+                    className="btn btn-primary field-sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setAttendanceTest(selectedTest);
+                      setPresentIds(
+                        dParts
+                          .filter((p) => p.attendance_status === 'present' || p.attendance_status === 'pending')
+                          .map((p) => p.student_id),
+                      );
+                    }}
+                  >
+                    {selectedTest.status === 'scheduled' ? 'Confirm attendance & activate' : 'Attendance'}
+                  </button>
+                )}
+                {selectedTest.status !== 'finalized' && (
+                  <button
+                    type="button"
+                    className="btn field-sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setAddStudentTest(selectedTest);
+                      setAddStudentIds([]);
+                    }}
+                  >
+                    Add students
+                  </button>
+                )}
+                {selectedTest.status !== 'scheduled' && selectedTest.status !== 'finalized' && (
+                  <button type="button" className="btn field-sm" disabled={busy} onClick={() => void toggleTestActive(selectedTest)}>
+                    {selectedTest.active ? 'Close' : 'Reopen'}
+                  </button>
+                )}
+                {dAtts.length > 0 && selectedTest.status !== 'finalized' && (
+                  <button type="button" className="btn field-sm" disabled={busy} onClick={() => void finalizeMarks(selectedTest)}>
+                    Submit & approve marks
+                  </button>
+                )}
                 <button type="button" className="btn field-sm" onClick={() => setReportTest(selectedTest)}>
                   Performance report
+                </button>
+                <button type="button" className="btn field-sm" onClick={() => setViewMode('dashboard')}>
+                  ← Back to dashboard
                 </button>
               </div>
             }
           >
+            {dPendingRequests.length > 0 && (
+              <div style={{ marginBottom: 14, padding: 10, borderRadius: 6, border: '1px solid var(--assist)', background: '#FFF8F0' }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
+                  Join requests via code ({dPendingRequests.length} waiting approval — not in reports until approved)
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {dPendingRequests.map((req) => {
+                    const prof = studentProfiles.find((s) => s.id === req.student_id);
+                    const dispName = req.requested_name || prof?.full_name || prof?.email || req.student_id;
+                    const dispPrn = req.requested_prn || prof?.roll_no || '—';
+                    return (
+                      <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                        <span>
+                          <strong className="mono">{dispPrn}</strong> · {dispName}
+                        </span>
+                        <span style={{ display: 'inline-flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn btn-primary field-sm"
+                            disabled={busy}
+                            onClick={() => void reviewJoinRequest(selectedTest.id, req.student_id, true)}
+                          >
+                            Approve & admit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            disabled={busy}
+                            onClick={() => void reviewJoinRequest(selectedTest.id, req.student_id, false)}
+                          >
+                            Decline
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -1394,9 +1477,61 @@ export function InstantTestStep({
             ) : null}
 
             {detailTab === 'marks' ? (
-              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                Use the main test list below or click <strong>Performance report</strong> above to inspect code, override marks (decrease-only), and submit final marks.
-              </div>
+              dAtts.length === 0 ? (
+                <Empty title="No student attempts yet" body="Attempts will appear here once students start the assessment." />
+              ) : (
+                <table className="compact-table">
+                  <thead>
+                    <tr>
+                      <th>PRN</th>
+                      <th>Name</th>
+                      <th>Pre</th>
+                      <th>Code</th>
+                      <th>Override</th>
+                      <th>Viva</th>
+                      <th>Total</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: 'right' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dAtts.map((a) => (
+                      <tr key={a.id}>
+                        <td className="mono" style={{ fontSize: 11.5 }}>{a.prn}</td>
+                        <td>{a.student_name}</td>
+                        <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.pretest_score}/{selectedTest.pretest_marks}</td>
+                        <td className="mono">{a.coding_score}</td>
+                        <td className="mono">{a.coding_override_score ?? '—'}</td>
+                        <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.viva_score}/{selectedTest.viva_marks}</td>
+                        <td className="mono" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          {a.final_score}/{selectedTest.total_marks}
+                        </td>
+                        <td>
+                          <Chip tone={a.marks_approved ? 'good' : a.code_approved ? 'neutral' : 'warn'}>
+                            {a.marks_approved ? 'Approved' : a.code_approved ? 'Code ok' : 'Pending'}
+                          </Chip>
+                        </td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <button
+                            type="button"
+                            className="btn field-sm"
+                            style={{ padding: '4px 8px', fontSize: 11.5 }}
+                            onClick={() => {
+                              setInspectCtx({ test: selectedTest, attempt: a });
+                              setGradeApprove(a.code_approved || true);
+                              setGradeOverride(a.coding_override_score !== null ? String(a.coding_override_score) : '');
+                              setGradeReason(a.override_reason ?? '');
+                              setGradeViva(String(a.viva_score ?? 0));
+                            }}
+                          >
+                            Code inspect
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
             ) : null}
           </Card>
         );
@@ -2297,181 +2432,6 @@ export function InstantTestStep({
         </form>
       </Card>
       ) : null}
-
-      <Card title="Scheduled & live instant coding tests">
-        {tests.length === 0 ? (
-          <Empty title="No instant tests yet" body="Schedule or publish an instant coding test above." />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {tests.map((t) => {
-              const parts = participantsByTest[t.id] ?? [];
-              const pendingRequests = parts.filter((p) => p.approval_status === 'pending');
-              const approvedIds = new Set(
-                parts.filter((p) => (p.approval_status ?? 'approved') === 'approved').map((p) => p.student_id),
-              );
-              const attempts = (attemptsByTest[t.id] ?? [])
-                .filter((a) => parts.length === 0 || approvedIds.has(a.student_id))
-                .slice()
-                .sort((a, b) => a.prn.localeCompare(b.prn));
-              return (
-                <div key={t.id} style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                    <div>
-                      <span className="mono" style={{ fontSize: 14, fontWeight: 700, padding: '2px 8px', background: '#DCEBE6', color: '#0E5E52', borderRadius: 4, marginRight: 8 }}>
-                        {t.test_code}
-                      </span>
-                      <strong>{t.topic}</strong> · {t.question_count} Qs · {t.total_marks} marks · {t.scope_type} ({approvedIds.size} approved)
-                      {t.scheduled_at ? ` · ${formatDateTimeIst(t.scheduled_at)}` : ''}
-                    </div>
-                    <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <Chip tone={t.status === 'active' ? 'good' : t.status === 'scheduled' ? 'warn' : 'neutral'}>
-                        {t.status}
-                      </Chip>
-                      {t.status !== 'finalized' && (
-                        <button
-                          type="button"
-                          className="btn btn-primary field-sm"
-                          disabled={busy}
-                          onClick={() => {
-                            setAttendanceTest(t);
-                            setPresentIds(
-                              parts
-                                .filter((p) => p.attendance_status === 'present' || p.attendance_status === 'pending')
-                                .map((p) => p.student_id),
-                            );
-                          }}
-                        >
-                          {t.status === 'scheduled' ? 'Confirm attendance & activate' : 'Attendance'}
-                        </button>
-                      )}
-                      {t.status !== 'finalized' && (
-                        <button
-                          type="button"
-                          className="btn field-sm"
-                          disabled={busy}
-                          onClick={() => {
-                            setAddStudentTest(t);
-                            setAddStudentIds([]);
-                          }}
-                        >
-                          Add students
-                        </button>
-                      )}
-                      {t.status !== 'scheduled' && t.status !== 'finalized' && (
-                        <button type="button" className="btn field-sm" disabled={busy} onClick={() => void toggleTestActive(t)}>
-                          {t.active ? 'Close' : 'Reopen'}
-                        </button>
-                      )}
-                      {attempts.length > 0 && t.status !== 'finalized' && (
-                        <button type="button" className="btn field-sm" disabled={busy} onClick={() => void finalizeMarks(t)}>
-                          Submit & approve marks
-                        </button>
-                      )}
-                      <button type="button" className="btn field-sm" onClick={() => setReportTest(t)}>
-                        Performance report
-                      </button>
-                    </div>
-                  </div>
-
-                  {pendingRequests.length > 0 && (
-                    <div style={{ marginTop: 10, padding: 10, borderRadius: 6, border: '1px solid var(--assist)', background: '#FFF8F0' }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
-                        Join requests via code ({pendingRequests.length} waiting approval — not in reports until approved)
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {pendingRequests.map((req) => {
-                          const prof = studentProfiles.find((s) => s.id === req.student_id);
-                          const dispName = req.requested_name || prof?.full_name || prof?.email || req.student_id;
-                          const dispPrn = req.requested_prn || prof?.roll_no || '—';
-                          return (
-                            <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                              <span>
-                                <strong className="mono">{dispPrn}</strong> · {dispName}
-                              </span>
-                              <span style={{ display: 'inline-flex', gap: 6 }}>
-                                <button
-                                  type="button"
-                                  className="btn btn-primary field-sm"
-                                  disabled={busy}
-                                  onClick={() => void reviewJoinRequest(t.id, req.student_id, true)}
-                                >
-                                  Approve & admit
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn field-sm"
-                                  disabled={busy}
-                                  onClick={() => void reviewJoinRequest(t.id, req.student_id, false)}
-                                >
-                                  Decline
-                                </button>
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {attempts.length > 0 && (
-                    <table className="compact-table" style={{ marginTop: 10 }}>
-                      <thead>
-                        <tr>
-                          <th>PRN</th>
-                          <th>Name</th>
-                          <th>Pre</th>
-                          <th>Code</th>
-                          <th>Override</th>
-                          <th>Viva</th>
-                          <th>Total</th>
-                          <th>Status</th>
-                          <th style={{ textAlign: 'right' }}>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {attempts.map((a) => (
-                          <tr key={a.id}>
-                            <td className="mono" style={{ fontSize: 11.5 }}>{a.prn}</td>
-                            <td>{a.student_name}</td>
-                            <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.pretest_score}/{t.pretest_marks}</td>
-                            <td className="mono">{a.coding_score}</td>
-                            <td className="mono">{a.coding_override_score ?? '—'}</td>
-                            <td className="mono" style={{ whiteSpace: 'nowrap' }}>{a.viva_score}/{t.viva_marks}</td>
-                            <td className="mono" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
-                              {a.final_score}/{t.total_marks}
-                            </td>
-                            <td>
-                              <Chip tone={a.marks_approved ? 'good' : a.code_approved ? 'neutral' : 'warn'}>
-                                {a.marks_approved ? 'Approved' : a.code_approved ? 'Code ok' : 'Pending'}
-                              </Chip>
-                            </td>
-                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                              <button
-                                type="button"
-                                className="btn field-sm"
-                                style={{ padding: '4px 8px', fontSize: 11.5 }}
-                                onClick={() => {
-                                  setInspectCtx({ test: t, attempt: a });
-                                  setGradeApprove(a.code_approved || true);
-                                  setGradeOverride(a.coding_override_score !== null ? String(a.coding_override_score) : '');
-                                  setGradeReason(a.override_reason ?? '');
-                                  setGradeViva(String(a.viva_score ?? 0));
-                                }}
-                              >
-                                Code inspect
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
 
       <Modal
         open={attendanceTest !== null}
